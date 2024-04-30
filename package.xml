@@ -28,7 +28,6 @@
   <build_depend>geometry_msgs</build_depend>
   <build_depend>visualization_msgs</build_depend>
   <build_depend>rosgraph_msgs</build_depend>
-  <build_depend>image_transport</build_depend>
   <build_depend>tf2</build_depend>
   <build_depend>tf2_eigen</build_depend>
   <build_depend>tf2_ros</build_depend>
@@ -69,9 +68,6 @@
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>visualization_msgs</exec_depend>
   <exec_depend>rosgraph_msgs</exec_depend>
-  <exec_depend>image_transport</exec_depend>
-  <exec_depend>compressed_depth_image_transport</exec_depend>
-  <exec_depend>compressed_image_transport</exec_depend>
   <exec_depend>tf2</exec_depend>
   <exec_depend>tf2_eigen</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
