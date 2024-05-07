@@ -1,6 +1,7 @@
 #include "cslam/front_end/rgbd_handler.h"
 #include <rtabmap_conversions/MsgConversion.h>
 
+
 // For visualization
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/PCLPointCloud2.h>
@@ -42,6 +43,17 @@ RGBDHandler::RGBDHandler(std::shared_ptr<rclcpp::Node> &node)
                       enable_gps_recording_);
   node->get_parameter("evaluation.gps_topic",
                       gps_topic_);
+
+  
+  //Fetch all the rtabmap parameters and then assign them to an rtabmap param setup
+  std::map<std::string, rclcpp::Parameter> pmap;
+  node->get_parameters("rtabmap", pmap);
+  auto paramList = rtabmap::Parameters::getDefaultParameters();
+  for (auto const& x : paramList) {
+    node->declare_parameter<std::string>("rtabmap." + x.first, x.second);
+    auto val = node->get_parameter("rtabmap." + x.first);
+    rtabmap_parameters.insert_or_assign(x.first, val.as_string());
+  }
 
   if (keyframe_generation_ratio_threshold_ > 0.99)
   {
@@ -112,10 +124,8 @@ RGBDHandler::RGBDHandler(std::shared_ptr<rclcpp::Node> &node)
                 std::placeholders::_1));
 
   // Registration settings
-  rtabmap::ParametersMap registration_params;
-  registration_params.insert(rtabmap::ParametersPair(
-      rtabmap::Parameters::kVisMinInliers(), std::to_string(min_inliers_)));
-  registration_.parseParameters(registration_params);
+  rtabmap_parameters.insert_or_assign(rtabmap::Parameters::kVisMinInliers(), std::to_string(min_inliers_));
+  registration_.parseParameters(rtabmap_parameters);
 
   // Intra-robot loop closure publisher
   intra_robot_loop_closure_publisher_ = node_->create_publisher<
@@ -299,10 +309,7 @@ void RGBDHandler::compute_local_descriptors(
     }
   }
 
-  rtabmap::ParametersMap registration_params;
-  registration_params.insert(rtabmap::ParametersPair(
-      rtabmap::Parameters::kVisMinInliers(), std::to_string(min_inliers_)));
-  auto detector = rtabmap::Feature2D::create(registration_params);
+  auto detector = rtabmap::Feature2D::create(rtabmap_parameters);
 
   auto kpts = detector->generateKeypoints(image, depth_mask);
   auto descriptors = detector->generateDescriptors(image, kpts);
@@ -399,6 +406,7 @@ void RGBDHandler::sensor_data_to_rgbd_msg(
 {
   rtabmap_msgs::msg::RGBDImage data;
   rtabmap_conversions::rgbdImageToROS(*sensor_data, msg_data, "camera");
+  rtabmap_conversions::points3fToROS(sensor_data->keypoints3D(), msg_data.points);
 }
 
 void RGBDHandler::local_descriptors_request(

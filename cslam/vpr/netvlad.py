@@ -19,7 +19,6 @@ import sys
 import pickle
 import sklearn
 from sklearn.neighbors import NearestNeighbors
-from ament_index_python.packages import get_package_share_directory
 
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
@@ -146,14 +145,6 @@ class NetVLAD(object):
         self.enable = self.params['frontend.nn_checkpoint'].lower(
         ) != 'disable'
         if self.enable:
-            pkg_folder = get_package_share_directory("cslam")
-            self.params['frontend.nn_checkpoint'] = join(
-                pkg_folder, self.params['frontend.nn_checkpoint'])
-            self.params['frontend.netvlad.pca_checkpoint'] = join(
-                pkg_folder,
-                self.node.get_parameter(
-                    'frontend.netvlad.pca_checkpoint').value)
-
             if torch.cuda.is_available():
                 self.device = torch.device("cuda")
             else:

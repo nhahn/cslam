@@ -20,7 +20,6 @@ import pickle
 import sklearn
 from sklearn.neighbors import NearestNeighbors
 from cslam.vpr.cosplace_utils.network import GeoLocalizationNet
-from ament_index_python.packages import get_package_share_directory
 
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
@@ -42,9 +41,6 @@ class CosPlace(object):
         self.enable = self.params['frontend.nn_checkpoint'].lower(
         ) != 'disable'
         if self.enable:
-            pkg_folder = get_package_share_directory("cslam")
-            self.params['frontend.nn_checkpoint'] = join(
-                pkg_folder, self.params['frontend.nn_checkpoint'])
 
             if torch.cuda.is_available():
                 self.device = torch.device("cuda")

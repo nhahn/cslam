@@ -108,6 +108,7 @@ void StereoHandler::stereo_callback(
   {
 		localTransform = rtabmap_conversions::getTransform(
 		    base_frame_id_, image_rect_left->header.frame_id, stamp, *tf_buffer_, 0.1);
+
 		if (localTransform.isNull()) {
 		  RCLCPP_INFO(node_->get_logger(),
 		               "Could not get transform from %s to %s after 0.1 s!",

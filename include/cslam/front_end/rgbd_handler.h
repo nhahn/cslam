@@ -289,6 +289,7 @@ namespace cslam
             received_gps_queue_;
 
     private:
+        rtabmap::ParametersMap rtabmap_parameters;
         image_transport::SubscriberFilter sub_image_color_;
         message_filters::Subscriber<sensor_msgs::msg::CameraInfo> sub_camera_info_color_;
         image_transport::SubscriberFilter sub_image_depth_;

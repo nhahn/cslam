@@ -16,7 +16,6 @@
   <exec_depend>rosidl_default_runtime</exec_depend>
   <member_of_group>rosidl_interface_packages</member_of_group>
   
-  <build_depend>cv_bridge</build_depend>
   <build_depend>rclcpp</build_depend>
   <build_depend>rclcpp_components</build_depend>
   <build_depend>rclpy</build_depend>
@@ -35,9 +34,7 @@
   <build_depend>pcl_conversions</build_depend>
   <build_depend>message_filters</build_depend>
   <build_depend>class_loader</build_depend>
-  <build_depend>rtabmap</build_depend>
   <build_depend>rtabmap_msgs</build_depend>
-  <build_depend>rtabmap_conversions</build_depend>
   <build_depend>octomap</build_depend>
   <build_depend>octomap_msgs</build_depend>
   <build_depend>image_geometry</build_depend>
@@ -50,12 +47,10 @@
   <build_depend>tf2_geometry_msgs</build_depend>
   <build_depend>pcl_ros</build_depend>
   <build_depend>pcl_msgs</build_depend>
-  <build_depend>perception_pcl</build_depend>
   <build_depend>diagnostic_msgs</build_depend>
   <build_depend>cslam_common_interfaces</build_depend>
   <build_depend>cslam_common_interfaces</build_depend>
 
-  <exec_depend>cv_bridge</exec_depend>
   <exec_depend>rclcpp</exec_depend>
   <exec_depend>rclcpp_components</exec_depend>
   <exec_depend>rclpy</exec_depend>
@@ -75,9 +70,7 @@
   <exec_depend>pcl_conversions</exec_depend>
   <exec_depend>message_filters</exec_depend>
   <exec_depend>class_loader</exec_depend>
-  <exec_depend>rtabmap</exec_depend>
   <exec_depend>rtabmap_msgs</exec_depend>
-  <exec_depend>rtabmap_conversions</exec_depend>
   <exec_depend>octomap</exec_depend>
   <exec_depend>octomap_msgs</exec_depend>
   <exec_depend>image_geometry</exec_depend>
@@ -89,7 +82,6 @@
   <exec_depend>tf2_geometry_msgs</exec_depend>
   <exec_depend>pcl_ros</exec_depend>
   <exec_depend>pcl_msgs</exec_depend>
-  <exec_depend>perception_pcl</exec_depend>
   <exec_depend>diagnostic_msgs</exec_depend>
   <exec_depend>cslam_common_interfaces</exec_depend>
   <exec_depend>cslam_common_interfaces</exec_depend>
