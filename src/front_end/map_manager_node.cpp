@@ -1,4 +1,5 @@
 #include "cslam/front_end/map_manager.h"
+#include <rtabmap/utilite/ULogger.h>
 
 using namespace cslam;
 
@@ -9,11 +10,27 @@ using namespace cslam;
  * @param argv
  * @return int
  */
+
+std::map<std::string, ULogger::Level> rtabmapLogLevel =
+{
+    { "debug", ULogger::kDebug },
+    { "info", ULogger::kInfo },
+    { "warning", ULogger::kWarning },
+    { "error", ULogger::kError },
+    { "fatal", ULogger::kFatal }
+};
+
 int main(int argc, char **argv) {
 
   rclcpp::init(argc, argv);
 
   auto node = std::make_shared<rclcpp::Node>("map_manager");
+
+  //Adjustable RTABMAP log level here
+  node->declare_parameter<std::string>("rtabmap.log_level", "warning");
+  ULogger::setType(ULogger::kTypeConsole);
+  auto level = rtabmapLogLevel.find(node->get_parameter("rtabmap.log_level").as_string());
+  ULogger::setLevel(level == rtabmapLogLevel.end()? ULogger::kWarning : level->second);
 
   node->declare_parameter<int>("frontend.pnp_min_inliers", 20);
   node->declare_parameter<int>("frontend.max_queue_size", 10);

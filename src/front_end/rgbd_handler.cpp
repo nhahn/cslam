@@ -1,5 +1,6 @@
 #include "cslam/front_end/rgbd_handler.h"
 #include <rtabmap_conversions/MsgConversion.h>
+#include <rtabmap/core/PythonInterface.h>
 
 
 // For visualization
@@ -46,6 +47,8 @@ RGBDHandler::RGBDHandler(std::shared_ptr<rclcpp::Node> &node)
 
   
   //Fetch all the rtabmap parameters and then assign them to an rtabmap param setup
+  //Initialize the interface, or we get an error
+  rtabmap::PythonInterface pythonInterface;
   std::map<std::string, rclcpp::Parameter> pmap;
   node->get_parameters("rtabmap", pmap);
   auto paramList = rtabmap::Parameters::getDefaultParameters();
