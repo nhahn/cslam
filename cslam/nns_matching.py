@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import numpy as np
-from scipy.spatial import distance
+import cupy as cp
+from cupyx.scipy.spatial import distance
 
 
 class NearestNeighborsMatching(object):
@@ -16,10 +17,10 @@ class NearestNeighborsMatching(object):
         self.n = 0
         self.dim = dim
         self.items = dict()
-        self.data = []
+        self.data = cp.asarray([])
         if dim is not None:
-            self.data = np.zeros((1000, dim), dtype='float32')
-
+            self.data = cp.zeros((1000, dim), dtype='float32')
+                
     def add_item(self, vector, item):
         """Add item to the matching list
 
@@ -31,12 +32,13 @@ class NearestNeighborsMatching(object):
         if self.n >= len(self.data):
             if self.dim is None:
                 self.dim = len(vector)
-                self.data = np.zeros((1000, self.dim), dtype='float32')
+                self.data = cp.zeros((1000, self.dim), dtype='float32')
             else:
                 self.data.resize((2 * len(self.data), self.dim),
                                  refcheck=False)
+                
         self.items[self.n] = item
-        self.data[self.n] = vector
+        self.data[self.n] = cp.asarray(vector, dtype='float32')
         self.n += 1
 
     def search(self, query, k):  # searching from 100000 items consume 30ms
@@ -49,15 +51,11 @@ class NearestNeighborsMatching(object):
         Returns:
             list(int, np.array): best matches
         """
+        
         if len(self.data) == 0:
             return [], []
-
-        similarities = np.zeros(self.n)
-
-        for i in range(self.n):
-            similarities[i] = 1 - distance.cosine(query, self.data[i,:].squeeze())
-
-        ns = np.argsort(similarities)[::-1][:k]
+        similarities = 1 - distance.cdist(self.data[:self.n,:], query.reshape((1,self.dim)), 'cosine').reshape(self.n)
+        ns = cp.asnumpy(cp.argsort(similarities)[::-1][:k])
         return [self.items[n] for n in ns], similarities[ns]
 
     def search_best(self, query):
