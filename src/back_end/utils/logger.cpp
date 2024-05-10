@@ -229,7 +229,7 @@ namespace cslam
                 for (const auto &factor_ : *graph)
                 {
                     auto factor =
-                        boost::dynamic_pointer_cast<gtsam::BetweenFactor<gtsam::Pose3>>(
+                        std::dynamic_pointer_cast<gtsam::BetweenFactor<gtsam::Pose3>>(
                             factor_);
                     if (factor)
                     {

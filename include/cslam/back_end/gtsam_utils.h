@@ -1,5 +1,4 @@
-#ifndef GTSAMMSGCONVERSION_H_
-#define GTSAMMSGCONVERSION_H_
+#pragma once
 
 #include <rclcpp/rclcpp.hpp>
 
@@ -68,6 +67,15 @@ gtsam_values_to_msg(const gtsam::Values::shared_ptr values);
 /**
  * @brief Converts from GTSAM to ROS 2 message
  * 
+ * @param values 
+ * @return std::vector<cslam_common_interfaces::msg::PoseGraphValue> 
+ */
+std::vector<cslam_common_interfaces::msg::PoseGraphValue>
+gtsam_values_to_msg(const std::map<gtsam::Key,gtsam::Pose3> &values);
+
+/**
+ * @brief Converts from GTSAM to ROS 2 message
+ * 
  * @param factors 
  * @return std::vector<cslam_common_interfaces::msg::PoseGraphEdge> 
  */
@@ -119,5 +127,3 @@ gtsam::NonlinearFactorGraph::shared_ptr edges_msg_to_gtsam(
     const std::vector<cslam_common_interfaces::msg::PoseGraphEdge> &edges);
 
 } // namespace cslam
-
-#endif

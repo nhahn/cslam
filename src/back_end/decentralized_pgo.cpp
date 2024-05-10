@@ -36,6 +36,7 @@ DecentralizedPGO::DecentralizedPGO(std::shared_ptr<rclcpp::Node> &node)
   int max_waiting_param;
   node_->get_parameter("backend.max_waiting_time_sec", max_waiting_param);
   max_waiting_time_sec_ = rclcpp::Duration(max_waiting_param, 0);
+  node->get_parameter("backend.solver", backend_linear_solver_);
 
   odometry_subscriber_ =
       node->create_subscription<cslam_common_interfaces::msg::KeyframeOdom>(
@@ -68,9 +69,9 @@ DecentralizedPGO::DecentralizedPGO(std::shared_ptr<rclcpp::Node> &node)
       rotation_default_noise_std_, translation_default_noise_std_,
       translation_default_noise_std_, translation_default_noise_std_;
   default_noise_model_ = gtsam::noiseModel::Diagonal::Sigmas(sigmas);
-  pose_graph_ = boost::make_shared<gtsam::NonlinearFactorGraph>();
-  current_pose_estimates_ = boost::make_shared<gtsam::Values>();
-  odometry_pose_estimates_ = boost::make_shared<gtsam::Values>();
+  pose_graph_ = std::make_shared<gtsam::NonlinearFactorGraph>();
+  current_pose_estimates_ = std::make_shared<gtsam::Values>();
+  odometry_pose_estimates_ = std::make_shared<gtsam::Values>();
 
   // Optimization timers
   optimization_timer_ = node_->create_wall_timer(
@@ -377,7 +378,7 @@ cslam_common_interfaces::msg::PoseGraph DecentralizedPGO::fill_pose_graph_msg(co
   cslam_common_interfaces::msg::PoseGraph out_msg;
   out_msg.robot_id = robot_id_;
   out_msg.values = gtsam_values_to_msg(odometry_pose_estimates_);
-  auto graph = boost::make_shared<gtsam::NonlinearFactorGraph>();
+  auto graph = std::make_shared<gtsam::NonlinearFactorGraph>();
   graph->push_back(pose_graph_->begin(), pose_graph_->end());
 
   std::set<unsigned int> connected_robots;
@@ -558,8 +559,8 @@ DecentralizedPGO::aggregate_pose_graphs()
   // Check connectivity
   auto is_pose_graph_connected = connected_robot_pose_graph();
   // Aggregate graphs
-  auto graph = boost::make_shared<gtsam::NonlinearFactorGraph>();
-  auto estimates = boost::make_shared<gtsam::Values>();
+  auto graph = std::make_shared<gtsam::NonlinearFactorGraph>();
+  auto estimates = std::make_shared<gtsam::Values>();
   // Local graph
   graph->push_back(pose_graph_->begin(), pose_graph_->end());
   estimates->insert(*odometry_pose_estimates_);
@@ -611,7 +612,7 @@ DecentralizedPGO::aggregate_pose_graphs()
     for (const auto &factor_ : *other_robots_graph_and_estimates_[id].first)
     {
       auto factor =
-          boost::dynamic_pointer_cast<gtsam::BetweenFactor<gtsam::Pose3>>(
+          std::dynamic_pointer_cast<gtsam::BetweenFactor<gtsam::Pose3>>(
               factor_);
       unsigned int robot0_id =
           ROBOT_ID(gtsam::LabeledSymbol(factor->key1()).label());
@@ -670,11 +671,11 @@ void DecentralizedPGO::share_optimized_estimates(
   for (unsigned int i = 0; i < included_robots_ids.robots.ids.size(); i++)
   {
     cslam_common_interfaces::msg::OptimizationResult msg;
+    auto vals = estimates.extract<gtsam::Pose3>(gtsam::LabeledSymbol::LabelTest(
+            ROBOT_LABEL(included_robots_ids.robots.ids[i])));
     msg.success = true;
     msg.origin_robot_id = origin_robot_id_;
-    msg.estimates =
-        gtsam_values_to_msg(estimates.filter(gtsam::LabeledSymbol::LabelTest(
-            ROBOT_LABEL(included_robots_ids.robots.ids[i]))));
+    msg.estimates = gtsam_values_to_msg(vals);
     optimized_estimates_publishers_[included_robots_ids.robots.ids[i]]->publish(
         msg);
   }
@@ -701,7 +702,7 @@ void DecentralizedPGO::visualization_callback()
     out_msg.robot_id = robot_id_;
     out_msg.origin_robot_id = origin_robot_id_;
     out_msg.values = gtsam_values_to_msg(current_pose_estimates_);
-    auto graph = boost::make_shared<gtsam::NonlinearFactorGraph>();
+    auto graph = std::make_shared<gtsam::NonlinearFactorGraph>();
     graph->push_back(pose_graph_->begin(), pose_graph_->end());
 
     for (unsigned int i = 0; i < max_nb_robots_; i++)
@@ -803,6 +804,8 @@ DecentralizedPGO::optimize(const gtsam::NonlinearFactorGraph::shared_ptr &graph,
   }
   try{
     gtsam::GncParams<gtsam::LevenbergMarquardtParams> params;
+    params.baseOptimizerParams.setLinearSolverType(backend_linear_solver_);
+    //params.baseOptimizerParams.linearSolverType = gtsam::NonlinearOptimizerParams::LinearSolverType::CHOLMOD;
     gtsam::GncOptimizer<gtsam::GncParams<gtsam::LevenbergMarquardtParams>>
         optimizer(*graph, *initial, params);
     result = optimizer.optimize();

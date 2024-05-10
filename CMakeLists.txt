@@ -6,9 +6,9 @@ if(NOT CMAKE_C_STANDARD)
   set(CMAKE_C_STANDARD 99)
 endif()
 
-# Default to C++14
+# Default to C++17
 if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 14)
+  set(CMAKE_CXX_STANDARD 17)
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -36,13 +36,12 @@ find_package(tf2 REQUIRED)
 find_package(tf2_eigen REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
-find_package(pcl_ros REQUIRED)
 find_package(pcl_msgs REQUIRED)
 find_package(perception_pcl REQUIRED)
 #find_package(eigen_conversions REQUIRED)
 find_package(laser_geometry REQUIRED)
 find_package(pcl_conversions REQUIRED)
-#find_package(pcl_ros REQUIRED)
+find_package(pcl_ros REQUIRED)
 #find_package(dynamic_reconfigure REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(class_loader REQUIRED)
@@ -60,17 +59,18 @@ find_package(rtabmap_conversions REQUIRED)
 #find_package(find_object_2d)
 #find_package(fiducial_msgs)
 
-find_package(RTABMap 0.20.18 REQUIRED)
+find_package(RTABMap REQUIRED)
+find_package(CUDAToolkit REQUIRED)
 
 # Find GTSAM
 find_package(GTSAM CONFIG REQUIRED)
 
 # kinetic issue, rtabmap now requires at least c++11
 include(CheckCXXCompilerFlag)
-CHECK_CXX_COMPILER_FLAG("-std=c++14" COMPILER_SUPPORTS_CXX14)
-set(CMAKE_CXX_STANDARD 14)
+CHECK_CXX_COMPILER_FLAG("-std=c++17" COMPILER_SUPPORTS_CXX17)
+set(CMAKE_CXX_STANDARD 17)
 
-find_package(PCL 1.7 
+find_package(PCL 1.7
             REQUIRED QUIET COMPONENTS 
             common 
             io 
@@ -123,7 +123,6 @@ SET(Libraries
    stereo_msgs
    diagnostic_msgs
    tf2_geometry_msgs
-   pcl_ros
    pcl_msgs
    perception_pcl
    RTABMap

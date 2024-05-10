@@ -1,5 +1,4 @@
-#ifndef _CSLAM_LOGGER_H_
-#define _CSLAM_LOGGER_H_
+#pragma once
 
 #include <vector>
 #include <string>
@@ -11,7 +10,6 @@
 #include <gtsam/inference/Key.h>
 #include <gtsam/inference/LabeledSymbol.h>
 #include <gtsam/linear/NoiseModel.h>
-#include <gtsam/nonlinear/GncOptimizer.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/slam/BetweenFactor.h>
@@ -107,5 +105,3 @@ namespace cslam
     };
 
 } // namespace cslam
-
-#endif // _CSLAM_LOGGER_H_

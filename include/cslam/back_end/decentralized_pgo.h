@@ -1,5 +1,4 @@
-#ifndef _DECENTRALIZED_PGO_H_
-#define _DECENTRALIZED_PGO_H_
+#pragma once
 
 #include <rclcpp/rclcpp.hpp>
 
@@ -288,7 +287,8 @@ namespace cslam
 
         unsigned int max_nb_robots_, robot_id_, optimization_count_;
         bool enable_logs_;
-
+        std::string backend_linear_solver_;
+        
         unsigned int pose_graph_optimization_start_period_ms_,
             pose_graph_optimization_loop_period_ms_,
             visualization_period_ms_;
@@ -418,4 +418,3 @@ namespace cslam
         std::shared_ptr<SimulatedRendezVous> sim_rdv_;
     };
 } // namespace cslam
-#endif

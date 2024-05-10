@@ -1,5 +1,4 @@
-#ifndef _CSLAM_SIMULATED_RENDEZVOUS_H_
-#define _CSLAM_SIMULATED_RENDEZVOUS_H_
+#pragma once
 
 #include <vector>
 #include <string>
@@ -40,5 +39,3 @@ namespace cslam
     };
 
 } // namespace cslam
-
-#endif // _CSLAM_SIMULATED_RENDEZVOUS_H_
