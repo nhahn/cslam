@@ -34,8 +34,7 @@ class NearestNeighborsMatching(object):
                 self.dim = len(vector)
                 self.data = cp.zeros((1000, self.dim), dtype='float32')
             else:
-                self.data.resize((2 * len(self.data), self.dim),
-                                 refcheck=False)
+                self.data = cp.resize(self.data, (2 * self.data.shape[0], self.dim))
                 
         self.items[self.n] = item
         self.data[self.n] = cp.asarray(vector, dtype='float32')
