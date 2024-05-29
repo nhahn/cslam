@@ -29,7 +29,7 @@ class NearestNeighborsMatching(object):
             item: identification info (e.g., int)
         """
         assert vector.ndim == 1
-        if self.n >= len(self.data):
+        if self.n >= self.data.shape[0]:
             if self.dim is None:
                 self.dim = len(vector)
                 self.data = cp.zeros((1000, self.dim), dtype='float32')
