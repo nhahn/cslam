@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 import numpy as np
-import cupy as cp
-from cupyx.scipy.spatial import distance
+from scipy.spatial import distance
 
 
 class NearestNeighborsMatching(object):
@@ -17,10 +16,10 @@ class NearestNeighborsMatching(object):
         self.n = 0
         self.dim = dim
         self.items = dict()
-        self.data = cp.asarray([])
+        self.data = []
         if dim is not None:
-            self.data = cp.zeros((1000, dim), dtype='float32')
-                
+            self.data = np.zeros((1000, dim), dtype='float32')
+
     def add_item(self, vector, item):
         """Add item to the matching list
 
@@ -29,15 +28,15 @@ class NearestNeighborsMatching(object):
             item: identification info (e.g., int)
         """
         assert vector.ndim == 1
-        if self.n >= self.data.shape[0]:
+        if self.n >= len(self.data):
             if self.dim is None:
                 self.dim = len(vector)
-                self.data = cp.zeros((1000, self.dim), dtype='float32')
+                self.data = np.zeros((1000, self.dim), dtype='float32')
             else:
-                self.data = cp.resize(self.data, (2 * self.data.shape[0], self.dim))
-                
+                self.data.resize((2 * len(self.data), self.dim),
+                                 refcheck=False)
         self.items[self.n] = item
-        self.data[self.n] = cp.asarray(vector, dtype='float32')
+        self.data[self.n] = vector
         self.n += 1
 
     def search(self, query, k):  # searching from 100000 items consume 30ms
@@ -50,11 +49,15 @@ class NearestNeighborsMatching(object):
         Returns:
             list(int, np.array): best matches
         """
-        
         if len(self.data) == 0:
             return [], []
-        similarities = 1 - distance.cdist(self.data[:self.n,:], query.reshape((1,self.dim)), 'cosine').reshape(self.n)
-        ns = cp.asnumpy(cp.argsort(similarities)[::-1][:k])
+
+        similarities = np.zeros(self.n)
+
+        for i in range(self.n):
+            similarities[i] = 1 - distance.cosine(query, self.data[i,:].squeeze())
+
+        ns = np.argsort(similarities)[::-1][:k]
         return [self.items[n] for n in ns], similarities[ns]
 
     def search_best(self, query):
