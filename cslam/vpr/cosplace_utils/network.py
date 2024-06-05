@@ -15,7 +15,6 @@ CHANNELS_NUM_IN_LAST_CONV = {
         "vgg16": 512,
     }
 
-
 class GeoLocalizationNet(nn.Module):
     def __init__(self, backbone, fc_output_dim, node):
         super().__init__()
@@ -35,7 +34,7 @@ class GeoLocalizationNet(nn.Module):
         return x
 
 
-def get_backbone(backbone_name):
+def get_backbone(backbone_name) -> tuple[nn.Sequential, int]:
     if backbone_name.startswith("resnet"):
         if backbone_name == "resnet18":
             backbone = torchvision.models.resnet18(pretrained=True)

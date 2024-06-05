@@ -49,9 +49,9 @@ class CosPlace(object):
 
             self.descriptor_dim = self.params[
                 'frontend.cosplace.descriptor_dim']
-            self.model = GeoLocalizationNet(
+            self.model = torch.jit.script(GeoLocalizationNet(
                 self.params['frontend.cosplace.backbone'], self.descriptor_dim,
-                node)
+                node))
 
             resume_ckpt = self.params['frontend.nn_checkpoint']
             if isfile(resume_ckpt):
@@ -66,13 +66,14 @@ class CosPlace(object):
                 exit()
 
             self.model.eval()
-            self.transform = transforms.Compose([
+            self.transforms = nn.Sequential(
+                transforms.Grayscale(3),
                 transforms.CenterCrop(self.params["frontend.image_crop_size"]),
                 transforms.Resize(224, interpolation=3),
-                transforms.ToTensor(),
                 transforms.Normalize(IMAGENET_DEFAULT_MEAN,
                                      IMAGENET_DEFAULT_STD),
-            ])
+            ).compile()
+            
 
     def compute_embedding(self, keyframe):
         """Load image to device and extract the global image descriptor
@@ -85,9 +86,9 @@ class CosPlace(object):
         """
         if self.enable:
             with torch.no_grad():
-                image = Image.fromarray(keyframe)
-                input = self.transform(image)
-                input = torch.unsqueeze(input, 0)
+                image = transforms.Compose([transforms.ToTensor()])(keyframe)
+                input = self.transforms(image.to(self.device))
+                input = torch.unsqueeze(input,0)
                 input = input.to(self.device)
 
                 image_encoding = self.model.forward(input)
