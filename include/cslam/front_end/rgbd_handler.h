@@ -287,6 +287,7 @@ namespace cslam
         sensor_msgs::msg::NavSatFix latest_gps_fix_;
         std::deque<sensor_msgs::msg::NavSatFix>
             received_gps_queue_;
+        std::string global_image_topic_;
 
     private:
         rtabmap::ParametersMap rtabmap_parameters;

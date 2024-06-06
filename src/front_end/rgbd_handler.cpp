@@ -45,7 +45,9 @@ RGBDHandler::RGBDHandler(std::shared_ptr<rclcpp::Node> &node)
   node->get_parameter("evaluation.gps_topic",
                       gps_topic_);
 
-  
+  node->declare_parameter<std::string>("frontend.global_descriptor_image_topic", "");
+  global_image_topic_ = node_->get_parameter("frontend.global_descriptor_image_topic").as_string();
+
   //Fetch all the rtabmap parameters and then assign them to an rtabmap param setup
   //Initialize the interface, or we get an error
   rtabmap::PythonInterface pythonInterface;
@@ -567,7 +569,11 @@ void RGBDHandler::receive_local_image_descriptors(
 void RGBDHandler::send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data)
 {
   cv::Mat rgb;
-  keypoints_data.first->uncompressDataConst(&rgb, 0);
+  if (global_image_topic_.length() > 0) {
+    keypoints_data.first->uncompressDataConst(0, 0, 0, &rgb);
+  } else {
+    keypoints_data.first->uncompressDataConst(&rgb, 0);
+  }
 
   // Image message
   std_msgs::msg::Header header;
@@ -595,7 +601,11 @@ void RGBDHandler::send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorD
 void RGBDHandler::send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data, const sensor_msgs::msg::NavSatFix& gps_data)
 {
   cv::Mat rgb;
-  keypoints_data.first->uncompressDataConst(&rgb, 0);
+  if (global_image_topic_.length() > 0) {
+    keypoints_data.first->uncompressDataConst(0, 0, 0, &rgb);
+  } else {
+    keypoints_data.first->uncompressDataConst(&rgb, 0);
+  }
 
   // Image message
   std_msgs::msg::Header header;
