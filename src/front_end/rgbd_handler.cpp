@@ -411,7 +411,7 @@ void RGBDHandler::sensor_data_to_rgbd_msg(
 {
   rtabmap_msgs::msg::RGBDImage data;
   rtabmap_conversions::rgbdImageToROS(*sensor_data, msg_data, "camera");
-  rtabmap_conversions::points3fToROS(sensor_data->keypoints3D(), msg_data.points);
+  //rtabmap_conversions::points3fToROS(sensor_data->keypoints3D(), msg_data.points);
 }
 
 void RGBDHandler::local_descriptors_request(
