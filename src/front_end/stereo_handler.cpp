@@ -223,7 +223,7 @@ void StereoHandler::stereo_with_additional_callback(
       }
     }
 
-    auto ptrImageLeft = cv_bridge::toCvShare(
+    auto ptrImageLeft = cv_bridge::toCvCopy(
         image_rect_left, image_rect_left->encoding.compare(
                            sensor_msgs::image_encodings::TYPE_8UC1) == 0 ||
                                image_rect_left->encoding.compare(
@@ -233,7 +233,7 @@ void StereoHandler::stereo_with_additional_callback(
                              sensor_msgs::image_encodings::MONO16) != 0
                            ? "bgr8"
                            : "mono8");
-   auto ptrImageRight = cv_bridge::toCvShare(
+   auto ptrImageRight = cv_bridge::toCvCopy(
         image_rect_right, image_rect_right->encoding.compare(
                             sensor_msgs::image_encodings::TYPE_8UC1) == 0 ||
                                 image_rect_right->encoding.compare(
@@ -241,13 +241,7 @@ void StereoHandler::stereo_with_additional_callback(
                             ? ""
                             : "mono8");
     
-    auto ptrGlobal = cv_bridge::toCvShare(
-    global_image, global_image->encoding.compare(
-                        sensor_msgs::image_encodings::TYPE_8UC1) == 0 ||
-                            global_image->encoding.compare(
-                                sensor_msgs::image_encodings::MONO8) == 0
-                        ? ""
-                        : "mono8");
+    auto ptrGlobal = cv_bridge::toCvCopy(global_image);
 
     auto data = std::make_shared<rtabmap::SensorData>(
         ptrImageLeft->image, ptrImageRight->image, stereoModel,
@@ -436,7 +430,7 @@ void StereoHandler::stereo_callback(
       }
     }
 
-    auto ptrImageLeft = cv_bridge::toCvShare(
+    auto ptrImageLeft = cv_bridge::toCvCopy(
         image_rect_left, image_rect_left->encoding.compare(
                            sensor_msgs::image_encodings::TYPE_8UC1) == 0 ||
                                image_rect_left->encoding.compare(
@@ -446,7 +440,7 @@ void StereoHandler::stereo_callback(
                              sensor_msgs::image_encodings::MONO16) != 0
                            ? "bgr8"
                            : "mono8");
-    auto ptrImageRight = cv_bridge::toCvShare(
+    auto ptrImageRight = cv_bridge::toCvCopy(
         image_rect_right, image_rect_right->encoding.compare(
                             sensor_msgs::image_encodings::TYPE_8UC1) == 0 ||
                                 image_rect_right->encoding.compare(
