@@ -15,6 +15,9 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic -g)
 endif()
 
+unset(ENV{CUDAARCHS} PARENT_SCOPE)
+set(CMAKE_CUDA_ARCHITECTURES 75)
+
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(builtin_interfaces REQUIRED)
@@ -51,7 +54,8 @@ find_package(image_geometry REQUIRED)
 # find_package(rtabmap_ros REQUIRED)
 find_package(rtabmap_msgs REQUIRED)
 find_package(rtabmap_conversions REQUIRED)
-
+find_package(super_point_inference REQUIRED)
+find_package(Torch REQUIRED)
 # Optional components
 #find_package(costmap_2d)
 #find_package(octomap_msgs)
@@ -129,10 +133,24 @@ SET(Libraries
   #  rtabmap_ros
    rtabmap_msgs
    rtabmap_conversions
+   super_point_inference
 )
 
 find_package(cslam_common_interfaces REQUIRED)
-find_package(cslam_common_interfaces REQUIRED)
+
+add_executable(pose_graph_manager 
+  src/back_end/decentralized_pgo.cpp
+  src/back_end/pose_graph_manager_node.cpp
+  src/back_end/utils/logger.cpp
+  src/back_end/gtsam_utils.cpp
+  src/back_end/utils/simulated_rendezvous.cpp)
+target_link_libraries(pose_graph_manager gtsam)
+
+ament_target_dependencies(pose_graph_manager 
+  ${Libraries}
+  cslam_common_interfaces cslam_common_interfaces)
+set_target_properties(pose_graph_manager 
+  PROPERTIES OUTPUT_NAME "pose_graph_manager")
 
 add_executable(map_manager 
   src/front_end/map_manager.cpp 
@@ -141,30 +159,12 @@ add_executable(map_manager
   src/front_end/rgbd_handler.cpp 
   #src/front_end/sensor_msg_utils.cpp
   src/front_end/visualization_utils.cpp)
-add_dependencies(map_manager  
-  map_manager
-  ${${PROJECT_NAME}_EXPORTED_TARGETS})
+
 ament_target_dependencies(map_manager 
-  ${Libraries} 
+  ${Libraries} Torch
   cslam_common_interfaces cslam_common_interfaces)
 set_target_properties(map_manager 
   PROPERTIES OUTPUT_NAME "map_manager")
-
-add_executable(pose_graph_manager 
-  src/back_end/decentralized_pgo.cpp
-  src/back_end/pose_graph_manager_node.cpp
-  src/back_end/utils/logger.cpp
-  src/back_end/gtsam_utils.cpp
-  src/back_end/utils/simulated_rendezvous.cpp)
-add_dependencies(pose_graph_manager  
-pose_graph_manager
-  ${${PROJECT_NAME}_EXPORTED_TARGETS})
-ament_target_dependencies(pose_graph_manager 
-  ${Libraries}
-  cslam_common_interfaces cslam_common_interfaces)
-target_link_libraries(pose_graph_manager gtsam)
-set_target_properties(pose_graph_manager 
-  PROPERTIES OUTPUT_NAME "pose_graph_manager")
 
 # Only required when using messages built from the same package
 # https://index.ros.org/doc/ros2/Tutorials/Rosidl-Tutorial/

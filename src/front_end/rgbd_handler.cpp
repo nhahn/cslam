@@ -1,14 +1,16 @@
 #include "cslam/front_end/rgbd_handler.h"
 #include <rtabmap_conversions/MsgConversion.h>
 #include <rtabmap/core/PythonInterface.h>
-
-
+#include <filesystem>
+#include <tuple>
 // For visualization
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/PCLPointCloud2.h>
 #include <pcl/point_types.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/passthrough.h>
+#include <ament_index_cpp/get_package_share_directory.hpp>
+#include <opencv2/core/eigen.hpp>
 
 using namespace rtabmap;
 using namespace cslam;
@@ -59,6 +61,9 @@ RGBDHandler::RGBDHandler(std::shared_ptr<rclcpp::Node> &node)
     auto val = node->get_parameter("rtabmap." + x.first);
     rtabmap_parameters.insert_or_assign(x.first, val.as_string());
   }
+  auto modelPath = std::filesystem::path(ament_index_cpp::get_package_share_directory("super_point_inference"));
+  modelPath /= "../weights/SuperPointNet.pt";
+  superpoint = std::make_shared<SuperPoint>(modelPath);
 
   if (keyframe_generation_ratio_threshold_ > 0.99)
   {
@@ -316,8 +321,14 @@ void RGBDHandler::compute_local_descriptors(
 
   auto detector = rtabmap::Feature2D::create(rtabmap_parameters);
 
-  auto kpts = detector->generateKeypoints(image, depth_mask);
-  auto descriptors = detector->generateDescriptors(image, kpts);
+  auto features = superpoint->getFeatures(image);
+  std::vector<cv::KeyPoint> kpts;
+  for (auto pt : std::get<0>(features).rowwise()) {
+    kpts.push_back(cv::KeyPoint(pt(0,0), pt(0,1), 1.0));
+  }
+
+  Eigen::MatrixXf descEigen = std::get<1>(features).cast<float>();
+  auto descriptors = cv::Mat(descEigen.rows(), descEigen.cols(), CV_32FC1, descEigen.data());
   auto kpts3D = detector->generateKeypoints3D(*frame_data, kpts);
 
   frame_data->setFeatures(kpts, kpts3D, descriptors);

@@ -318,7 +318,7 @@ class GlobalDescriptorLoopClosureDetection(object):
             if self.params["evaluation.enable_logs"]: start_time = time.time()
             # Find matches that maximize the algebraic connectivity
             selection = self.lcm.select_candidates(
-                self.params["frontend.inter_robot_loop_closure_budget"],
+                int(self.params["frontend.inter_robot_loop_closure_budget"]),
                 neighbors_is_in_range)
             
             # Extract and publish local descriptors

@@ -31,7 +31,7 @@ class LoopClosureSparseMatching(object):
                     self.other_robots_nnsm[i] = NearestNeighborsMatching()
         # Initialize candidate selection algorithm
         self.candidate_selector = AlgebraicConnectivityMaximization(
-            self.params['robot_id'], self.params['max_nb_robots'], extra_params=self.params)
+            self.params['robot_id'], self.params['max_nb_robots'])
 
     def add_local_global_descriptor(self, embedding, keyframe_id):
         """ Add a local keyframe for matching
@@ -106,5 +106,5 @@ class LoopClosureSparseMatching(object):
             list(EdgeInterRobot): selected edges
         """   
         return self.candidate_selector.select_candidates(
-            number_of_candidates, is_neighbor_in_range,
+            int(number_of_candidates), dict(is_neighbor_in_range),
             greedy_initialization)

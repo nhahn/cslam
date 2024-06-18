@@ -89,8 +89,6 @@ class CosPlace(object):
                 image = transforms.Compose([transforms.ToTensor()])(keyframe)
                 input = self.transforms(image.to(self.device))
                 input = torch.unsqueeze(input,0)
-                input = input.to(self.device)
-
                 image_encoding = self.model.forward(input)
 
                 output = image_encoding[0].detach().cpu().numpy()

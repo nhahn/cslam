@@ -29,6 +29,7 @@
 #include <cv_bridge/cv_bridge.h>
 
 #include <chrono>
+#include <super_point_inference.hpp>
 #include <cslam_common_interfaces/msg/keyframe_odom.hpp>
 #include <cslam_common_interfaces/msg/keyframe_rgb.hpp>
 #include <cslam_common_interfaces/msg/viz_point_cloud.hpp>
@@ -290,6 +291,7 @@ namespace cslam
         std::string global_image_topic_;
 
     private:
+        std::shared_ptr<SuperPoint> superpoint;
         rtabmap::ParametersMap rtabmap_parameters;
         image_transport::SubscriberFilter sub_image_color_;
         message_filters::Subscriber<sensor_msgs::msg::CameraInfo> sub_camera_info_color_;

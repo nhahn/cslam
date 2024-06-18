@@ -9,13 +9,14 @@ import networkx.linalg as la
 import numpy as np
 from scipy.sparse import csc_matrix, csr_matrix
 from scipy.sparse.linalg import eigsh, lobpcg
-
+import numba
+from numba.experimental import jitclass
 from cslam.mac.utils import *
 
 MACResult = namedtuple(
     'MACResult', ['w', 'F_unrounded', 'objective_values', 'duality_gaps'])
 
-
+@jitclass
 class MAC:
 
     def __init__(self, fixed_measurements, candidate_measurements, num_poses):
