@@ -50,8 +50,7 @@ class CosPlace(object):
             self.descriptor_dim = self.params[
                 'frontend.cosplace.descriptor_dim']
             self.model = torch.jit.script(GeoLocalizationNet(
-                self.params['frontend.cosplace.backbone'], self.descriptor_dim,
-                node))
+                self.params['frontend.cosplace.backbone'], self.descriptor_dim))
 
             resume_ckpt = self.params['frontend.nn_checkpoint']
             if isfile(resume_ckpt):
@@ -66,13 +65,13 @@ class CosPlace(object):
                 exit()
 
             self.model.eval()
-            self.transforms = nn.Sequential(
-                transforms.Grayscale(3),
+            self.transform = transforms.Compose([
                 transforms.CenterCrop(self.params["frontend.image_crop_size"]),
                 transforms.Resize(224, interpolation=3),
+                transforms.ToTensor(),
                 transforms.Normalize(IMAGENET_DEFAULT_MEAN,
                                      IMAGENET_DEFAULT_STD),
-            ).compile()
+            ])
             
 
     def compute_embedding(self, keyframe):
@@ -86,9 +85,11 @@ class CosPlace(object):
         """
         if self.enable:
             with torch.no_grad():
-                image = transforms.Compose([transforms.ToTensor()])(keyframe)
-                input = self.transforms(image.to(self.device))
-                input = torch.unsqueeze(input,0)
+                image = Image.fromarray(keyframe)
+                input = self.transform(image)
+                input = torch.unsqueeze(input, 0)
+                input = input.to(self.device)
+
                 image_encoding = self.model.forward(input)
 
                 output = image_encoding[0].detach().cpu().numpy()

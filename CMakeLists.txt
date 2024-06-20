@@ -15,9 +15,6 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic -g)
 endif()
 
-unset(ENV{CUDAARCHS} PARENT_SCOPE)
-set(CMAKE_CUDA_ARCHITECTURES 75)
-
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(builtin_interfaces REQUIRED)
@@ -40,7 +37,6 @@ find_package(tf2_eigen REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(pcl_msgs REQUIRED)
-find_package(perception_pcl REQUIRED)
 #find_package(eigen_conversions REQUIRED)
 find_package(laser_geometry REQUIRED)
 find_package(pcl_conversions REQUIRED)
@@ -56,13 +52,11 @@ find_package(rtabmap_msgs REQUIRED)
 find_package(rtabmap_conversions REQUIRED)
 find_package(super_point_inference REQUIRED)
 find_package(Torch REQUIRED)
-# Optional components
-#find_package(costmap_2d)
-#find_package(octomap_msgs)
-#find_package(apriltag_msgs)
-#find_package(find_object_2d)
-#find_package(fiducial_msgs)
 
+find_package(vpi REQUIRED)
+find_package(isaac_ros_managed_nitros REQUIRED)
+find_package(isaac_ros_common REQUIRED)
+find_package(isaac_ros_nitros_image_type REQUIRED)
 find_package(RTABMap REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 
@@ -74,18 +68,6 @@ include(CheckCXXCompilerFlag)
 CHECK_CXX_COMPILER_FLAG("-std=c++17" COMPILER_SUPPORTS_CXX17)
 set(CMAKE_CXX_STANDARD 17)
 
-find_package(PCL 1.7
-            REQUIRED QUIET COMPONENTS 
-            common 
-            io 
-            kdtree 
-            search 
-            surface 
-            filters 
-            registration 
-            sample_consensus 
-            segmentation
-            ) #This crashes idl generation if all components are found?! see https://github.com/ros2/rosidl/issues/402#issuecomment-565586908
 
 ###########
 ## Build ##
@@ -128,12 +110,14 @@ SET(Libraries
    diagnostic_msgs
    tf2_geometry_msgs
    pcl_msgs
-   perception_pcl
-   RTABMap
+   
   #  rtabmap_ros
    rtabmap_msgs
    rtabmap_conversions
-   super_point_inference
+   
+   isaac_ros_managed_nitros
+   isaac_ros_common
+   isaac_ros_nitros_image_type
 )
 
 find_package(cslam_common_interfaces REQUIRED)
@@ -148,7 +132,7 @@ target_link_libraries(pose_graph_manager gtsam)
 
 ament_target_dependencies(pose_graph_manager 
   ${Libraries}
-  cslam_common_interfaces cslam_common_interfaces)
+  cslam_common_interfaces)
 set_target_properties(pose_graph_manager 
   PROPERTIES OUTPUT_NAME "pose_graph_manager")
 
@@ -161,10 +145,19 @@ add_executable(map_manager
   src/front_end/visualization_utils.cpp)
 
 ament_target_dependencies(map_manager 
-  ${Libraries} Torch
-  cslam_common_interfaces cslam_common_interfaces)
+  ${Libraries} Torch RTABMap super_point_inference
+  cslam_common_interfaces)
 set_target_properties(map_manager 
   PROPERTIES OUTPUT_NAME "map_manager")
+
+add_executable(global_descriptor src/back_end/global_descriptor.cpp)
+ament_target_dependencies(global_descriptor 
+   rclcpp ament_index_cpp
+   super_point_inference
+  Torch cslam_common_interfaces)
+
+set_target_properties(global_descriptor 
+  PROPERTIES OUTPUT_NAME "global_descriptor")
 
 # Only required when using messages built from the same package
 # https://index.ros.org/doc/ros2/Tutorials/Rosidl-Tutorial/
@@ -186,7 +179,7 @@ install(DIRECTORY
 
 # Install nodes
 install(
-  TARGETS map_manager pose_graph_manager
+  TARGETS map_manager pose_graph_manager global_descriptor
   DESTINATION lib/${PROJECT_NAME}
 )
 

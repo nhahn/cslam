@@ -2,7 +2,7 @@ import numpy as np
 from cslam.nns_matching import NearestNeighborsMatching
 from cslam.lidar_pr.scancontext_matching import ScanContextMatching
 from cslam.algebraic_connectivity_maximization import AlgebraicConnectivityMaximization, EdgeInterRobot
-
+import torch
 class LoopClosureSparseMatching(object):
     """Sparse matching for loop closure detection
         Matches global descriptors to generate loop closure candidates
@@ -41,10 +41,11 @@ class LoopClosureSparseMatching(object):
             id (int): keyframe id
         """
         matches = []
-        self.local_nnsm.add_item(embedding, keyframe_id)
+        tensor = torch.from_numpy(embedding).cuda()
+        self.local_nnsm.add_item(tensor, keyframe_id)
         for i in range(self.params['max_nb_robots']):
             if i != self.params['robot_id']:
-                kf, similarity = self.other_robots_nnsm[i].search_best(embedding)
+                kf, similarity = self.other_robots_nnsm[i].search_best(tensor)
                 if kf is not None:
                     if similarity >= self.params['frontend.similarity_threshold']:
                         match = EdgeInterRobot(self.params['robot_id'], keyframe_id, i, kf,
@@ -59,11 +60,12 @@ class LoopClosureSparseMatching(object):
         Args:
             msg (cslam_common_interfaces.msg.GlobalDescriptor): global descriptor info
         """
+        tensor = torch.from_numpy(np.asarray(msg.descriptor)).cuda()
         self.other_robots_nnsm[msg.robot_id].add_item(
-            np.asarray(msg.descriptor), msg.keyframe_id)
+            tensor, msg.keyframe_id)
 
         match = None
-        kf, similarity = self.local_nnsm.search_best(np.asarray(msg.descriptor))
+        kf, similarity = self.local_nnsm.search_best(tensor)
         if kf is not None:   
             if similarity >= self.params['frontend.similarity_threshold']:
                 match = EdgeInterRobot(self.params['robot_id'], kf, msg.robot_id,
@@ -72,7 +74,8 @@ class LoopClosureSparseMatching(object):
         return match
 
     def match_local_loop_closures(self, descriptor, kf_id):
-        kfs, similarities = self.local_nnsm.search(descriptor,
+        tensor = torch.from_numpy(np.asarray(descriptor)).cuda()
+        kfs, similarities = self.local_nnsm.search(tensor,
                                          k=self.params['frontend.nb_best_matches'])
 
         if len(kfs) > 0 and kfs[0] == kf_id:

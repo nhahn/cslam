@@ -16,7 +16,7 @@ CHANNELS_NUM_IN_LAST_CONV = {
     }
 
 class GeoLocalizationNet(nn.Module):
-    def __init__(self, backbone, fc_output_dim, node):
+    def __init__(self, backbone, fc_output_dim):
         super().__init__()
         self.backbone, features_dim = get_backbone(backbone)
         self.aggregation = nn.Sequential(
@@ -26,7 +26,6 @@ class GeoLocalizationNet(nn.Module):
                 nn.Linear(features_dim, fc_output_dim),
                 L2Norm()
             )
-        self.node = node
     
     def forward(self, x):
         x = self.backbone(x)
