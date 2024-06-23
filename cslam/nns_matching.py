@@ -54,7 +54,7 @@ class NearestNeighborsMatching(object):
         qTensor = query.reshape(1, self.dim).to(self.device)
         similarity = torch.nn.functional.cosine_similarity(view, qTensor)
         ns = torch.argsort(similarity, descending=True)[:k]
-        return [self.items[n] for n in ns.tolist()], torch.gather(similarity,0, ns).numpy()
+        return [self.items[n] for n in ns.tolist()], torch.gather(similarity,0,ns).cpu().numpy()
 
     def search_best(self, query):
         """Search for the nearest neighbor

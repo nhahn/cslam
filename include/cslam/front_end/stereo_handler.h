@@ -14,7 +14,7 @@ namespace cslam
          *
          * @param node ROS 2 node handle
          */
-        StereoHandler(std::shared_ptr<rclcpp::Node> &node);
+        StereoHandler(rclcpp::Node * node);
         ~StereoHandler(){};
 
         /**

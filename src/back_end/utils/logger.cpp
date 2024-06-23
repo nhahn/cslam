@@ -3,7 +3,7 @@
 namespace cslam
 {
 
-    Logger::Logger(std::shared_ptr<rclcpp::Node> &node, const unsigned int &robot_id, const unsigned int &max_nb_robots, const std::string &log_folder) : robot_id_(robot_id)
+    Logger::Logger(rclcpp::Node * node, const unsigned int &robot_id, const unsigned int &max_nb_robots, const std::string &log_folder) : robot_id_(robot_id)
     {
         node_ = node;
         auto t = std::time(nullptr);

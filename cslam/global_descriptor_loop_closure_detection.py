@@ -54,9 +54,6 @@ class GlobalDescriptorLoopClosureDetection(object):
             self.global_descriptor = ScanContext(self.params, self.node)
             self.keyframe_type = "pointcloud"
         else:
-            from cslam.vpr.cosplace import CosPlace
-            self.node.get_logger().info('Using CosPlace. (default)')
-            self.global_descriptor = CosPlace(self.params, self.node)
             self.keyframe_type = "rgb"
 
         # ROS 2 objects setup
@@ -84,7 +81,7 @@ class GlobalDescriptorLoopClosureDetection(object):
 
         if self.keyframe_type == "rgb":
             self.receive_keyframe_subscriber = self.node.create_subscription(
-                KeyframeRGB, 'cslam/keyframe_data', self.receive_keyframe, 100)
+                GlobalDescriptor, 'cslam/processed_global_descriptor', self.receive_descriptor, 100)
         elif self.keyframe_type == "pointcloud":
             self.receive_keyframe_subscriber = self.node.create_subscription(
                 KeyframePointCloud, 'cslam/keyframe_data', self.receive_keyframe,
@@ -382,24 +379,8 @@ class GlobalDescriptorLoopClosureDetection(object):
                 vertices[key1] = [[s.robot0_id], [s.robot0_keyframe_id]]
         return vertices
 
-    def receive_keyframe(self, msg):
-        """Callback to add a keyframe 
-
-        Args:
-            msg (cslam_common_interfaces::msg::KeyframeRGB or KeyframePointCloud): Keyframe data
-        """
-        # Place recognition descriptor processing
-        embedding = []
-        if self.keyframe_type == "rgb":
-            bridge = CvBridge()
-            cv_image = bridge.imgmsg_to_cv2(msg.image,
-                                            desired_encoding='passthrough')
-            embedding = self.global_descriptor.compute_embedding(cv_image)
-        elif self.keyframe_type == "pointcloud":
-            embedding = self.global_descriptor.compute_embedding(
-                icp_utils.ros_pointcloud_to_points(msg.pointcloud))
-
-        self.add_global_descriptor_to_map(embedding, msg.id)
+    def receive_descriptor(self, msg):
+        self.add_global_descriptor_to_map(np.asarray(msg.descriptor), msg.keyframe_id)
 
     def global_descriptor_callback(self, msg):
         """Callback for descriptors received from other robots.

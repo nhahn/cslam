@@ -62,7 +62,7 @@ namespace cslam
          *
          * @param node ROS 2 node handle
          */
-        RGBDHandler(std::shared_ptr<rclcpp::Node> &node);
+        RGBDHandler(rclcpp::Node * node);
         ~RGBDHandler(){};
 
         /**
@@ -142,16 +142,9 @@ namespace cslam
          * @brief Function to send the image to the python node
          *
          * @param keypoints_data keyframe keypoints data
-         */
-        void send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data);
-
-        /**
-         * @brief Function to send the image to the python node
-         *
-         * @param keypoints_data keyframe keypoints data
          * @param gps_data GPS data
          */
-        void send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data, const sensor_msgs::msg::NavSatFix& gps_data);
+        void send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data, const sensor_msgs::msg::NavSatFix * gps_data = nullptr);
 
         /**
          * @brief Send keypoints for visualizations
@@ -221,7 +214,7 @@ namespace cslam
 
         std::map<int, std::shared_ptr<rtabmap::SensorData>> local_descriptors_map_;
 
-        std::shared_ptr<rclcpp::Node> node_;
+        rclcpp::Node * node_;
 
         unsigned int min_inliers_, max_nb_robots_, robot_id_, max_queue_size_,
             nb_local_keyframes_;

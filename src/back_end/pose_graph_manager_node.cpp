@@ -32,7 +32,7 @@ int main(int argc, char **argv) {
   node->declare_parameter<bool>("visualization.enable", false);
   node->declare_parameter<int>("visualization.publishing_period_ms", 0);
 
-  DecentralizedPGO manager(node);
+  DecentralizedPGO manager(node.get());
 
   rclcpp::spin(node);
 

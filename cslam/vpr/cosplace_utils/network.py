@@ -15,6 +15,18 @@ CHANNELS_NUM_IN_LAST_CONV = {
         "vgg16": 512,
     }
 
+import torchvision.transforms as T
+
+IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
+
+transforms = T.Compose([
+    T.CenterCrop(480),
+    T.Resize((224, 244), interpolation=3),
+    T.Normalize(IMAGENET_DEFAULT_MEAN,
+                            IMAGENET_DEFAULT_STD),
+])
+
 class GeoLocalizationNet(nn.Module):
     def __init__(self, backbone, fc_output_dim):
         super().__init__()
@@ -26,8 +38,11 @@ class GeoLocalizationNet(nn.Module):
                 nn.Linear(features_dim, fc_output_dim),
                 L2Norm()
             )
+        self.transforms = torch.nn.Sequential(*transforms.transforms)
     
     def forward(self, x):
+        x = self.transforms(x)
+        x = torch.unsqueeze(x, 0)
         x = self.backbone(x)
         x = self.aggregation(x)
         return x

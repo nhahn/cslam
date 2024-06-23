@@ -36,7 +36,7 @@ public:
    *
    * @param node ROS 2 node handle
    */
-  MapManager(std::shared_ptr<rclcpp::Node> &node);
+  MapManager(rclcpp::Node * node);
   ~MapManager(){};
 
   /**
@@ -46,7 +46,7 @@ public:
   void process_new_sensor_data();
 
 private:
-  std::shared_ptr<rclcpp::Node> node_;
+  rclcpp::Node * node_;
 
   unsigned int max_nb_robots_, robot_id_;
 

@@ -6,7 +6,7 @@
 
 using namespace cslam;
 
-DecentralizedPGO::DecentralizedPGO(std::shared_ptr<rclcpp::Node> &node)
+DecentralizedPGO::DecentralizedPGO(rclcpp::Node * node)
     : node_(node), max_waiting_time_sec_(60, 0)
 {
   node_->get_parameter("max_nb_robots", max_nb_robots_);
@@ -18,16 +18,16 @@ DecentralizedPGO::DecentralizedPGO(std::shared_ptr<rclcpp::Node> &node)
   node_->get_parameter("backend.enable_broadcast_tf_frames",
                        enable_broadcast_tf_frames_);
   node_->get_parameter("neighbor_management.heartbeat_period_sec", heartbeat_period_sec_);
-  node->get_parameter("evaluation.enable_logs",
+  node_->get_parameter("evaluation.enable_logs",
                       enable_logs_);
-  node->get_parameter("evaluation.log_folder",
+  node_->get_parameter("evaluation.log_folder",
                       log_folder_);
-  node->get_parameter("evaluation.enable_gps_recording",
+  node_->get_parameter("evaluation.enable_gps_recording",
                       enable_gps_recording_);
-  node->get_parameter("evaluation.enable_simulated_rendezvous", enable_simulated_rendezvous_);
+  node_->get_parameter("evaluation.enable_simulated_rendezvous", enable_simulated_rendezvous_);
   std::string rendezvous_schedule_file;
-  node->get_parameter("evaluation.rendezvous_schedule_file", rendezvous_schedule_file);
-  node->get_parameter("evaluation.enable_pose_timestamps_recording", enable_pose_timestamps_recording_);
+  node_->get_parameter("evaluation.rendezvous_schedule_file", rendezvous_schedule_file);
+  node_->get_parameter("evaluation.enable_pose_timestamps_recording", enable_pose_timestamps_recording_);
   node_->get_parameter("visualization.enable",
                        enable_visualization_);
   node_->get_parameter("visualization.publishing_period_ms",
@@ -36,28 +36,28 @@ DecentralizedPGO::DecentralizedPGO(std::shared_ptr<rclcpp::Node> &node)
   int max_waiting_param;
   node_->get_parameter("backend.max_waiting_time_sec", max_waiting_param);
   max_waiting_time_sec_ = rclcpp::Duration(max_waiting_param, 0);
-  node->get_parameter("backend.solver", backend_linear_solver_);
+  node_->get_parameter("backend.solver", backend_linear_solver_);
 
   odometry_subscriber_ =
-      node->create_subscription<cslam_common_interfaces::msg::KeyframeOdom>(
+      node_->create_subscription<cslam_common_interfaces::msg::KeyframeOdom>(
           "cslam/keyframe_odom", 1000,
           std::bind(&DecentralizedPGO::odometry_callback, this,
                     std::placeholders::_1));
 
-  intra_robot_loop_closure_subscriber_ = node->create_subscription<
+  intra_robot_loop_closure_subscriber_ = node_->create_subscription<
       cslam_common_interfaces::msg::IntraRobotLoopClosure>(
       "cslam/intra_robot_loop_closure", 1000,
       std::bind(&DecentralizedPGO::intra_robot_loop_closure_callback, this,
                 std::placeholders::_1));
 
-  inter_robot_loop_closure_subscriber_ = node->create_subscription<
+  inter_robot_loop_closure_subscriber_ = node_->create_subscription<
       cslam_common_interfaces::msg::InterRobotLoopClosure>(
       "/cslam/inter_robot_loop_closure", 1000,
       std::bind(&DecentralizedPGO::inter_robot_loop_closure_callback, this,
                 std::placeholders::_1));
 
   write_current_estimates_subscriber_ =
-      node->create_subscription<std_msgs::msg::String>(
+      node_->create_subscription<std_msgs::msg::String>(
           "cslam/print_current_estimates", 100,
           std::bind(&DecentralizedPGO::write_current_estimates_callback, this,
                     std::placeholders::_1));
@@ -102,18 +102,18 @@ DecentralizedPGO::DecentralizedPGO(std::shared_ptr<rclcpp::Node> &node)
   for (unsigned int i = 0; i < max_nb_robots_; i++)
   {
     optimized_estimates_publishers_.insert(
-        {i, node->create_publisher<
+        {i, node_->create_publisher<
                 cslam_common_interfaces::msg::OptimizationResult>(
                 "/r" + std::to_string(i) + "/cslam/optimized_estimates", 100)});
   }
 
-  optimized_estimates_subscriber_ = node->create_subscription<
+  optimized_estimates_subscriber_ = node_->create_subscription<
       cslam_common_interfaces::msg::OptimizationResult>(
       "cslam/optimized_estimates", 100,
       std::bind(&DecentralizedPGO::optimized_estimates_callback, this,
                 std::placeholders::_1));
 
-  optimized_pose_estimate_publisher_ = node->create_publisher<
+  optimized_pose_estimate_publisher_ = node_->create_publisher<
                 geometry_msgs::msg::PoseStamped>(
                 "/r" + std::to_string(robot_id_) + "/cslam/current_pose_estimate", 100);
 
@@ -133,10 +133,10 @@ DecentralizedPGO::DecentralizedPGO(std::shared_ptr<rclcpp::Node> &node)
 
   // Get neighbors ROS 2 objects
   get_current_neighbors_publisher_ =
-      node->create_publisher<std_msgs::msg::String>("cslam/get_current_neighbors",
+      node_->create_publisher<std_msgs::msg::String>("cslam/get_current_neighbors",
                                                     100);
 
-  current_neighbors_subscriber_ = node->create_subscription<
+  current_neighbors_subscriber_ = node_->create_subscription<
       cslam_common_interfaces::msg::RobotIdsAndOrigin>(
       "cslam/current_neighbors", 100,
       std::bind(&DecentralizedPGO::current_neighbors_callback, this,
@@ -146,29 +146,29 @@ DecentralizedPGO::DecentralizedPGO(std::shared_ptr<rclcpp::Node> &node)
   for (unsigned int i = 0; i < max_nb_robots_; i++)
   {
     get_pose_graph_publishers_.insert(
-        {i, node->create_publisher<cslam_common_interfaces::msg::RobotIds>(
+        {i, node_->create_publisher<cslam_common_interfaces::msg::RobotIds>(
                 "/r" + std::to_string(i) + "/cslam/get_pose_graph", 100)});
     received_pose_graphs_.insert({i, false});
   }
 
   get_pose_graph_subscriber_ =
-      node->create_subscription<cslam_common_interfaces::msg::RobotIds>(
+      node_->create_subscription<cslam_common_interfaces::msg::RobotIds>(
           "cslam/get_pose_graph", 100,
           std::bind(&DecentralizedPGO::get_pose_graph_callback, this,
                     std::placeholders::_1));
 
   pose_graph_publisher_ =
-      node->create_publisher<cslam_common_interfaces::msg::PoseGraph>(
+      node_->create_publisher<cslam_common_interfaces::msg::PoseGraph>(
           "/cslam/pose_graph", 100);
 
   pose_graph_subscriber_ =
-      node->create_subscription<cslam_common_interfaces::msg::PoseGraph>(
+      node_->create_subscription<cslam_common_interfaces::msg::PoseGraph>(
           "/cslam/pose_graph", 100,
           std::bind(&DecentralizedPGO::pose_graph_callback, this,
                     std::placeholders::_1));
 
   visualization_pose_graph_publisher_ =
-      node->create_publisher<cslam_common_interfaces::msg::PoseGraph>(
+      node_->create_publisher<cslam_common_interfaces::msg::PoseGraph>(
           "/cslam/viz/pose_graph", 100);
 
   // Optimizer
@@ -192,9 +192,11 @@ DecentralizedPGO::DecentralizedPGO(std::shared_ptr<rclcpp::Node> &node)
       std::chrono::milliseconds((unsigned int)heartbeat_period_sec_ * 1000),
       std::bind(&DecentralizedPGO::heartbeat_timer_callback, this));
 
+  rclcpp::PublisherOptions po;
+  po.use_intra_process_comm = rclcpp::IntraProcessSetting::Disable;
   reference_frame_per_robot_publisher_ =
       node_->create_publisher<cslam_common_interfaces::msg::ReferenceFrames>(
-          "cslam/reference_frames", rclcpp::QoS(1).transient_local());
+          "cslam/reference_frames", rclcpp::QoS(1).transient_local(), po);
 
   origin_robot_id_ = robot_id_;
 
@@ -232,7 +234,7 @@ bool DecentralizedPGO::check_received_pose_graphs()
 }
 
 void DecentralizedPGO::odometry_callback(
-    const cslam_common_interfaces::msg::KeyframeOdom::ConstSharedPtr msg)
+    const cslam_common_interfaces::msg::KeyframeOdom::UniquePtr msg)
 {
   gtsam::Pose3 current_estimate = odometry_msg_to_pose3(msg->odom);
   gtsam::LabeledSymbol symbol(GRAPH_LABEL, ROBOT_LABEL(robot_id_), msg->id);
@@ -268,7 +270,7 @@ void DecentralizedPGO::odometry_callback(
 
 void DecentralizedPGO::intra_robot_loop_closure_callback(
     const cslam_common_interfaces::msg::IntraRobotLoopClosure::
-        ConstSharedPtr msg)
+        UniquePtr msg)
 {
   if (msg->success)
   {

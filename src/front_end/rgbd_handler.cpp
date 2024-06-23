@@ -14,20 +14,21 @@
 
 using namespace rtabmap;
 using namespace cslam;
+rtabmap::PythonInterface pythonInterface;
 
 #define MAP_FRAME_ID(id) "robot" + std::to_string(id) + "_map"
 
-RGBDHandler::RGBDHandler(std::shared_ptr<rclcpp::Node> &node)
+RGBDHandler::RGBDHandler(rclcpp::Node * node)
     : node_(node)
 {
   node_->declare_parameter<std::string>("frontend.color_image_topic", "color/image");
   node_->declare_parameter<std::string>("frontend.depth_image_topic", "depth/image");
   node_->declare_parameter<std::string>("frontend.color_camera_info_topic",
                                         "color/camera_info");
-  node->declare_parameter<std::string>("frontend.odom_topic", "odom");
-  node->declare_parameter<float>("frontend.keyframe_generation_ratio_threshold", 0.0);
-  node->declare_parameter<std::string>("frontend.sensor_base_frame_id", ""); // If empty we assume that the camera link is the base link
-  node->declare_parameter<bool>("evaluation.enable_logs", false);
+  node_->declare_parameter<std::string>("frontend.odom_topic", "odom");
+  node_->declare_parameter<float>("frontend.keyframe_generation_ratio_threshold", 0.0);
+  node_->declare_parameter<std::string>("frontend.sensor_base_frame_id", ""); // If empty we assume that the camera link is the base link
+  node_->declare_parameter<bool>("evaluation.enable_logs", false);
   node_->get_parameter("frontend.max_queue_size", max_queue_size_);
   node_->get_parameter("frontend.keyframe_generation_ratio_threshold", keyframe_generation_ratio_threshold_);
   node_->get_parameter("frontend.sensor_base_frame_id", base_frame_id_);
@@ -42,23 +43,22 @@ RGBDHandler::RGBDHandler(std::shared_ptr<rclcpp::Node> &node)
 
   node_->get_parameter("evaluation.enable_logs",
                        enable_logs_);
-  node->get_parameter("evaluation.enable_gps_recording",
+  node_->get_parameter("evaluation.enable_gps_recording",
                       enable_gps_recording_);
-  node->get_parameter("evaluation.gps_topic",
+  node_->get_parameter("evaluation.gps_topic",
                       gps_topic_);
 
-  node->declare_parameter<std::string>("frontend.global_descriptor_image_topic", "");
+  node_->declare_parameter<std::string>("frontend.global_descriptor_image_topic", "");
   global_image_topic_ = node_->get_parameter("frontend.global_descriptor_image_topic").as_string();
 
   //Fetch all the rtabmap parameters and then assign them to an rtabmap param setup
   //Initialize the interface, or we get an error
-  rtabmap::PythonInterface pythonInterface;
   std::map<std::string, rclcpp::Parameter> pmap;
-  node->get_parameters("rtabmap", pmap);
+  node_->get_parameters("rtabmap", pmap);
   auto paramList = rtabmap::Parameters::getDefaultParameters();
   for (auto const& x : paramList) {
-    node->declare_parameter<std::string>("rtabmap." + x.first, x.second);
-    auto val = node->get_parameter("rtabmap." + x.first);
+    node_->declare_parameter<std::string>("rtabmap." + x.first, x.second);
+    auto val = node_->get_parameter("rtabmap." + x.first);
     rtabmap_parameters.insert_or_assign(x.first, val.as_string());
   }
   auto modelPath = std::filesystem::path(ament_index_cpp::get_package_share_directory("super_point_inference"));
@@ -76,7 +76,7 @@ RGBDHandler::RGBDHandler(std::shared_ptr<rclcpp::Node> &node)
 
   nb_local_keyframes_ = 0;
 
-  sub_odometry_.subscribe(node_.get(),
+  sub_odometry_.subscribe(node_,
                           node_->get_parameter("frontend.odom_topic").as_string(),
                           rclcpp::QoS(max_queue_size_)
                               .reliability((rmw_qos_reliability_policy_t)2)
@@ -106,7 +106,7 @@ RGBDHandler::RGBDHandler(std::shared_ptr<rclcpp::Node> &node)
           "cslam/keyframe_odom", 100);
 
   // Local matches subscription
-  local_keyframe_match_subscriber_ = node->create_subscription<
+  local_keyframe_match_subscriber_ = node_->create_subscription<
       cslam_common_interfaces::msg::LocalKeyframeMatch>(
       "cslam/local_keyframe_match", 100,
       std::bind(&RGBDHandler::receive_local_keyframe_match, this,
@@ -127,7 +127,7 @@ RGBDHandler::RGBDHandler(std::shared_ptr<rclcpp::Node> &node)
   }
 
   // Subscriber for local descriptors
-  local_descriptors_subscriber_ = node->create_subscription<
+  local_descriptors_subscriber_ = node_->create_subscription<
       cslam_common_interfaces::msg::LocalImageDescriptors>(
       "/cslam/local_descriptors", 100,
       std::bind(&RGBDHandler::receive_local_image_descriptors, this,
@@ -152,17 +152,17 @@ RGBDHandler::RGBDHandler(std::shared_ptr<rclcpp::Node> &node)
 
   // Subscriber for RGBD images
   sub_image_color_.subscribe(
-      node_.get(), node_->get_parameter("frontend.color_image_topic").as_string(), "raw",
+      node_, node_->get_parameter("frontend.color_image_topic").as_string(), "raw",
       rclcpp::QoS(max_queue_size_)
           .reliability((rmw_qos_reliability_policy_t)2)
           .get_rmw_qos_profile());
   sub_image_depth_.subscribe(
-      node_.get(), node_->get_parameter("frontend.depth_image_topic").as_string(), "raw",
+      node_, node_->get_parameter("frontend.depth_image_topic").as_string(), "raw",
       rclcpp::QoS(max_queue_size_)
           .reliability((rmw_qos_reliability_policy_t)2)
           .get_rmw_qos_profile());
   sub_camera_info_color_.subscribe(
-      node_.get(), node_->get_parameter("frontend.color_camera_info_topic").as_string(),
+      node_, node_->get_parameter("frontend.color_camera_info_topic").as_string(),
       rclcpp::QoS(max_queue_size_)
           .reliability((rmw_qos_reliability_policy_t)2)
           .get_rmw_qos_profile());
@@ -321,17 +321,16 @@ void RGBDHandler::compute_local_descriptors(
 
   auto detector = rtabmap::Feature2D::create(rtabmap_parameters);
 
-  auto features = superpoint->getFeatures(image);
-  std::vector<cv::KeyPoint> kpts;
-  for (auto pt : std::get<0>(features).rowwise()) {
-    kpts.push_back(cv::KeyPoint(pt(0,0), pt(0,1), 1.0));
-  }
-
-  Eigen::MatrixXf descEigen = std::get<1>(features).cast<float>();
-  auto descriptors = cv::Mat(descEigen.rows(), descEigen.cols(), CV_32FC1, descEigen.data());
+  auto kpts = detector->generateKeypoints(image, depth_mask);
+  auto descriptors = detector->generateDescriptors(image, kpts);
   auto kpts3D = detector->generateKeypoints3D(*frame_data, kpts);
 
   frame_data->setFeatures(kpts, kpts3D, descriptors);
+  
+  // auto features = superpoint->getFeatures(image);
+  // auto kpts3D = detector->generateKeypoints3D(*frame_data, std::get<0>(features));
+
+  // frame_data->setFeatures(std::get<0>(features), kpts3D, std::get<1>(features));
 }
 
 bool RGBDHandler::generate_new_keyframe(std::shared_ptr<rtabmap::SensorData> &keyframe)
@@ -399,7 +398,7 @@ void RGBDHandler::process_new_sensor_data()
         nb_local_keyframes_++;
 
         if (enable_gps_recording_) {
-          send_keyframe(sensor_data, gps_fix);
+          send_keyframe(sensor_data, &gps_fix);
         } else {
           // Send keyframe for loop detection
           send_keyframe(sensor_data);
@@ -430,23 +429,23 @@ void RGBDHandler::local_descriptors_request(
         ConstSharedPtr request)
 {
   // Fill msg
-  cslam_common_interfaces::msg::LocalImageDescriptors msg;
+  auto msg = std::make_unique<cslam_common_interfaces::msg::LocalImageDescriptors>();
   clear_sensor_data(local_descriptors_map_.at(request->keyframe_id));
   sensor_data_to_rgbd_msg(local_descriptors_map_.at(request->keyframe_id),
-                          msg.data);
-  msg.keyframe_id = request->keyframe_id;
-  msg.robot_id = robot_id_;
-  msg.matches_robot_id = request->matches_robot_id;
-  msg.matches_keyframe_id = request->matches_keyframe_id;
+                          msg->data);
+  msg->keyframe_id = request->keyframe_id;
+  msg->robot_id = robot_id_;
+  msg->matches_robot_id = request->matches_robot_id;
+  msg->matches_keyframe_id = request->matches_keyframe_id;
 
   // Publish local descriptors
-  local_descriptors_publisher_->publish(msg);
+  local_descriptors_publisher_->publish(std::move(msg));
 
   if (enable_logs_)
   {
-    log_total_local_descriptors_cumulative_communication_ += msg.data.key_points.size()*28; // bytes
-    log_total_local_descriptors_cumulative_communication_ += msg.data.points.size()*12; // bytes
-    log_total_local_descriptors_cumulative_communication_ += msg.data.descriptors.size(); // bytes
+    log_total_local_descriptors_cumulative_communication_ += msg->data.key_points.size()*28; // bytes
+    log_total_local_descriptors_cumulative_communication_ += msg->data.points.size()*12; // bytes
+    log_total_local_descriptors_cumulative_communication_ += msg->data.descriptors.size(); // bytes
     diagnostic_msgs::msg::KeyValue log_msg;
     log_msg.key = "local_descriptors_cumulative_communication";
     log_msg.value = std::to_string(log_total_local_descriptors_cumulative_communication_);
@@ -468,19 +467,19 @@ void RGBDHandler::receive_local_keyframe_match(
     rtabmap::Transform t = registration_.computeTransformation(
         *keyframe0, *keyframe1, rtabmap::Transform(), &reg_info);
 
-    cslam_common_interfaces::msg::IntraRobotLoopClosure lc;
-    lc.keyframe0_id = msg->keyframe0_id;
-    lc.keyframe1_id = msg->keyframe1_id;
+    auto lc = std::make_unique<cslam_common_interfaces::msg::IntraRobotLoopClosure>();
+    lc->keyframe0_id = msg->keyframe0_id;
+    lc->keyframe1_id = msg->keyframe1_id;
     if (!t.isNull())
     {
-      lc.success = true;
-      rtabmap_conversions::transformToGeometryMsg(t, lc.transform);
+      lc->success = true;
+      rtabmap_conversions::transformToGeometryMsg(t, lc->transform);
     }
     else
     {
-      lc.success = false;
+      lc->success = false;
     }
-    intra_robot_loop_closure_publisher_->publish(lc);
+    intra_robot_loop_closure_publisher_->publish(std::move(lc));
   }
   catch (std::exception &e)
   {
@@ -544,16 +543,16 @@ void RGBDHandler::receive_local_image_descriptors(
           *tmp_from, tmp_to, rtabmap::Transform(), &reg_info);
 
       // Store using pairs (robot_id, keyframe_id)
-      cslam_common_interfaces::msg::InterRobotLoopClosure lc;
-      lc.robot0_id = robot_id_;
-      lc.robot0_keyframe_id = local_keyframe_id;
-      lc.robot1_id = msg->robot_id;
-      lc.robot1_keyframe_id = msg->keyframe_id;
+      auto lc = std::make_unique<cslam_common_interfaces::msg::InterRobotLoopClosure>();
+      lc->robot0_id = robot_id_;
+      lc->robot0_keyframe_id = local_keyframe_id;
+      lc->robot1_id = msg->robot_id;
+      lc->robot1_keyframe_id = msg->keyframe_id;
       if (!t.isNull())
       {
-        lc.success = true;
-        rtabmap_conversions::transformToGeometryMsg(t, lc.transform);
-        inter_robot_loop_closure_publisher_->publish(lc);
+        lc->success = true;
+        rtabmap_conversions::transformToGeometryMsg(t, lc->transform);
+        inter_robot_loop_closure_publisher_->publish(std::move(lc));
       }
       else
       {
@@ -562,8 +561,8 @@ void RGBDHandler::receive_local_image_descriptors(
             "Could not compute transformation between (%d,%d) and (%d,%d): %s",
             robot_id_, local_keyframe_id, msg->robot_id, msg->keyframe_id,
             reg_info.rejectedMsg.c_str());
-        lc.success = false;
-        inter_robot_loop_closure_publisher_->publish(lc);
+        lc->success = false;
+        inter_robot_loop_closure_publisher_->publish(std::move(lc));
       }
     }
     catch (std::exception &e)
@@ -577,64 +576,31 @@ void RGBDHandler::receive_local_image_descriptors(
   }
 }
 
-void RGBDHandler::send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data)
+void RGBDHandler::send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data, const sensor_msgs::msg::NavSatFix * gps_data)
 {
-  cv::Mat rgb;
+  cv::Mat img;
   if (global_image_topic_.length() > 0) {
-    keypoints_data.first->uncompressDataConst(0, 0, 0, &rgb);
+    keypoints_data.first->uncompressDataConst(0, 0, 0, &img);
   } else {
-    keypoints_data.first->uncompressDataConst(&rgb, 0);
+    keypoints_data.first->uncompressDataConst(&img, 0);
   }
 
   // Image message
   std_msgs::msg::Header header;
   header.stamp = keypoints_data.second->header.stamp;
-  cv_bridge::CvImage image_bridge = cv_bridge::CvImage(
-      header, sensor_msgs::image_encodings::RGB8, rgb);
-  cslam_common_interfaces::msg::KeyframeRGB keyframe_msg;
-  image_bridge.toImageMsg(keyframe_msg.image);
-  keyframe_msg.id = keypoints_data.first->id();
+  cv_bridge::CvImage image_bridge = cv_bridge::CvImage(header, img.channels() > 1? "rgb8":"mono8", img);
+  auto keyframe_msg = std::make_unique<cslam_common_interfaces::msg::KeyframeRGB>();
+  image_bridge.toImageMsg(keyframe_msg->image);
+  keyframe_msg->id = keypoints_data.first->id();
 
-  keyframe_data_publisher_->publish(keyframe_msg);
+  keyframe_data_publisher_->publish(std::move(keyframe_msg));
 
-  // Odometry message
-  cslam_common_interfaces::msg::KeyframeOdom odom_msg;
-  odom_msg.id = keypoints_data.first->id();
-  odom_msg.odom = *keypoints_data.second;
-  keyframe_odom_publisher_->publish(odom_msg);
-
-  if (enable_visualization_)
-  {
-    send_visualization(keypoints_data);
-  }
-}
-
-void RGBDHandler::send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data, const sensor_msgs::msg::NavSatFix& gps_data)
-{
-  cv::Mat rgb;
-  if (global_image_topic_.length() > 0) {
-    keypoints_data.first->uncompressDataConst(0, 0, 0, &rgb);
-  } else {
-    keypoints_data.first->uncompressDataConst(&rgb, 0);
-  }
-
-  // Image message
-  std_msgs::msg::Header header;
-  header.stamp = node_->now();
-  cv_bridge::CvImage image_bridge = cv_bridge::CvImage(
-      header, sensor_msgs::image_encodings::RGB8, rgb);
-  cslam_common_interfaces::msg::KeyframeRGB keyframe_msg;
-  image_bridge.toImageMsg(keyframe_msg.image);
-  keyframe_msg.id = keypoints_data.first->id();
-
-  keyframe_data_publisher_->publish(keyframe_msg);
-
-  // Odometry message
-  cslam_common_interfaces::msg::KeyframeOdom odom_msg;
-  odom_msg.id = keypoints_data.first->id();
-  odom_msg.odom = *keypoints_data.second;
-  odom_msg.gps = gps_data;
-  keyframe_odom_publisher_->publish(odom_msg);
+  auto odom_msg = std::make_unique<cslam_common_interfaces::msg::KeyframeOdom>() ;
+  odom_msg->id = keypoints_data.first->id();
+  odom_msg->odom = *keypoints_data.second;
+  if(gps_data != nullptr) 
+    odom_msg->gps = *gps_data;
+  keyframe_odom_publisher_->publish(std::move(odom_msg));
 
   if (enable_visualization_)
   {
@@ -658,15 +624,15 @@ void RGBDHandler::clear_sensor_data(std::shared_ptr<rtabmap::SensorData>& sensor
 void RGBDHandler::send_visualization_keypoints(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data)
 {
   // visualization message
-  cslam_common_interfaces::msg::LocalImageDescriptors features_msg;
+  auto features_msg = std::make_unique<cslam_common_interfaces::msg::LocalImageDescriptors>();
   sensor_data_to_rgbd_msg(keypoints_data.first,
-                          features_msg.data);
-  features_msg.keyframe_id = keypoints_data.first->id();
-  features_msg.robot_id = robot_id_;
-  features_msg.data.key_points.clear();
+                          features_msg->data);
+  features_msg->keyframe_id = keypoints_data.first->id();
+  features_msg->robot_id = robot_id_;
+  features_msg->data.key_points.clear();
 
   // Publish local descriptors
-  visualization_local_descriptors_publisher_->publish(features_msg);
+  visualization_local_descriptors_publisher_->publish(std::move(features_msg));
 }
 
 sensor_msgs::msg::PointCloud2 RGBDHandler::visualization_pointcloud_voxel_subsampling(

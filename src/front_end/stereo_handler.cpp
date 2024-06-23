@@ -4,40 +4,40 @@
 using namespace rtabmap;
 using namespace cslam;
 
-StereoHandler::StereoHandler(std::shared_ptr<rclcpp::Node> &node)
+StereoHandler::StereoHandler(rclcpp::Node * node)
     : RGBDHandler(node) {
-  node->declare_parameter<std::string>("frontend.left_image_topic", "left/image_rect");
-  node->declare_parameter<std::string>("frontend.right_image_topic", "right/image_rect");
-  node->declare_parameter<std::string>("frontend.left_camera_info_topic",
+  node_->declare_parameter<std::string>("frontend.left_image_topic", "left/image_rect");
+  node_->declare_parameter<std::string>("frontend.right_image_topic", "right/image_rect");
+  node_->declare_parameter<std::string>("frontend.left_camera_info_topic",
                                        "left/camera_info");
-  node->declare_parameter<std::string>("frontend.right_camera_info_topic",
+  node_->declare_parameter<std::string>("frontend.right_camera_info_topic",
                                        "right/camera_info");
 
   // Subscriber for stereo images
   sub_image_rect_left_.subscribe(
-      node_.get(), node_->get_parameter("frontend.left_image_topic").as_string(), "raw",
+      node_, node_->get_parameter("frontend.left_image_topic").as_string(), "raw",
       rclcpp::QoS(max_queue_size_)
           .reliability((rmw_qos_reliability_policy_t)2)
           .get_rmw_qos_profile());
   sub_image_rect_right_.subscribe(
-      node_.get(), node_->get_parameter("frontend.right_image_topic").as_string(), "raw",
+      node_, node_->get_parameter("frontend.right_image_topic").as_string(), "raw",
       rclcpp::QoS(max_queue_size_)
           .reliability((rmw_qos_reliability_policy_t)2)
           .get_rmw_qos_profile());
   sub_camera_info_left_.subscribe(
-      node_.get(), node_->get_parameter("frontend.left_camera_info_topic").as_string(),
+      node_, node_->get_parameter("frontend.left_camera_info_topic").as_string(),
       rclcpp::QoS(max_queue_size_)
           .reliability((rmw_qos_reliability_policy_t)2)
           .get_rmw_qos_profile());
   sub_camera_info_right_.subscribe(
-      node_.get(), node_->get_parameter("frontend.right_camera_info_topic").as_string(),
+      node_, node_->get_parameter("frontend.right_camera_info_topic").as_string(),
       rclcpp::QoS(max_queue_size_)
           .reliability((rmw_qos_reliability_policy_t)2)
           .get_rmw_qos_profile());
 
   if (global_image_topic_.length() > 0) {
       sub_image_global_.subscribe(
-      node_.get(), node_->get_parameter("frontend.global_descriptor_image_topic").as_string(), "raw",
+      node_, node_->get_parameter("frontend.global_descriptor_image_topic").as_string(), "raw",
       rclcpp::QoS(max_queue_size_)
           .reliability((rmw_qos_reliability_policy_t)2)
           .get_rmw_qos_profile());

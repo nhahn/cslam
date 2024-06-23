@@ -68,7 +68,7 @@ namespace cslam
          *
          * @param node ROS 2 node handle
          */
-        DecentralizedPGO(std::shared_ptr<rclcpp::Node> &node);
+        DecentralizedPGO(rclcpp::Node * node);
         ~DecentralizedPGO(){};
 
         /**
@@ -77,7 +77,7 @@ namespace cslam
          * @param msg
          */
         void odometry_callback(
-            const cslam_common_interfaces::msg::KeyframeOdom::ConstSharedPtr msg);
+            const cslam_common_interfaces::msg::KeyframeOdom::UniquePtr msg);
 
         /**
          * @brief Receives inter-robot loop closures
@@ -95,7 +95,7 @@ namespace cslam
          */
         void intra_robot_loop_closure_callback(
             const cslam_common_interfaces::msg::IntraRobotLoopClosure::
-                ConstSharedPtr msg);
+                UniquePtr msg);
 
         /**
          * @brief Receives current neighbors
@@ -283,7 +283,7 @@ namespace cslam
         void check_result_and_finish_optimization();
 
     private:
-        std::shared_ptr<rclcpp::Node> node_;
+        rclcpp::Node * node_;
 
         unsigned int max_nb_robots_, robot_id_, optimization_count_;
         bool enable_logs_;

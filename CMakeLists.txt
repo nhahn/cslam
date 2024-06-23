@@ -122,42 +122,59 @@ SET(Libraries
 
 find_package(cslam_common_interfaces REQUIRED)
 
-add_executable(pose_graph_manager 
+# add_executable(pose_graph_manager 
+#   src/back_end/decentralized_pgo.cpp
+#   src/back_end/pose_graph_manager_node.cpp
+#   src/back_end/utils/logger.cpp
+#   src/back_end/gtsam_utils.cpp
+#   src/back_end/utils/simulated_rendezvous.cpp)
+# target_link_libraries(pose_graph_manager gtsam)
+# ament_target_dependencies(pose_graph_manager 
+#   ${Libraries}
+#   cslam_common_interfaces)
+# set_target_properties(pose_graph_manager 
+#   PROPERTIES OUTPUT_NAME "pose_graph_manager")
+
+set(node_plugins "")
+
+set(pose_graph_manager_component ${comp}_component)
+add_library(pose_graph_manager_component SHARED
   src/back_end/decentralized_pgo.cpp
-  src/back_end/pose_graph_manager_node.cpp
+  src/back_end/pose_graph_manager_component.cpp
   src/back_end/utils/logger.cpp
   src/back_end/gtsam_utils.cpp
   src/back_end/utils/simulated_rendezvous.cpp)
-target_link_libraries(pose_graph_manager gtsam)
-
-ament_target_dependencies(pose_graph_manager 
+ament_target_dependencies(pose_graph_manager_component 
   ${Libraries}
   cslam_common_interfaces)
-set_target_properties(pose_graph_manager 
-  PROPERTIES OUTPUT_NAME "pose_graph_manager")
+target_link_libraries(pose_graph_manager_component gtsam)
+rclcpp_components_register_node(pose_graph_manager_component PLUGIN "cslam::PoseGraphManagerComponent" EXECUTABLE pose_graph_manager)
+set(node_plugins "${node_plugins}cslam::PoseGraphManagerComponent;$<TARGET_FILE:pose_graph_manager_component>\n")
 
-add_executable(map_manager 
+set(map_manager_component ${comp}_component)
+add_library(map_manager_component SHARED
   src/front_end/map_manager.cpp 
-  src/front_end/map_manager_node.cpp 
+  src/front_end/map_manager_component.cpp 
   src/front_end/stereo_handler.cpp 
   src/front_end/rgbd_handler.cpp 
   #src/front_end/sensor_msg_utils.cpp
-  src/front_end/visualization_utils.cpp)
-
-ament_target_dependencies(map_manager 
+  src/front_end/visualization_utils.cpp
+)
+ament_target_dependencies(map_manager_component 
   ${Libraries} Torch RTABMap super_point_inference
   cslam_common_interfaces)
-set_target_properties(map_manager 
-  PROPERTIES OUTPUT_NAME "map_manager")
+rclcpp_components_register_node(map_manager_component PLUGIN "cslam::MapManagerComponent" EXECUTABLE map_manager)
+set(node_plugins "${node_plugins}cslam::MapManagerComponent;$<TARGET_FILE:map_manager_component>\n")
 
-add_executable(global_descriptor src/back_end/global_descriptor.cpp)
-ament_target_dependencies(global_descriptor 
-   rclcpp ament_index_cpp
-   super_point_inference
-  Torch cslam_common_interfaces)
-
-set_target_properties(global_descriptor 
-  PROPERTIES OUTPUT_NAME "global_descriptor")
+set(global_descriptor_component ${comp}_component)
+add_library(global_descriptor_component SHARED
+  src/back_end/global_descriptor_component.cpp
+)
+ament_target_dependencies(global_descriptor_component 
+  ${Libraries} Torch super_point_inference
+  cslam_common_interfaces)
+rclcpp_components_register_node(global_descriptor_component PLUGIN "cslam::GlobalDescriptorComponent" EXECUTABLE global_descriptor)
+set(node_plugins "${node_plugins}cslam::GlobalDescriptorComponent;$<TARGET_FILE:global_descriptor_component>\n")
 
 # Only required when using messages built from the same package
 # https://index.ros.org/doc/ros2/Tutorials/Rosidl-Tutorial/
@@ -176,6 +193,16 @@ install(DIRECTORY
    models
    DESTINATION share/${PROJECT_NAME}/
 )
+
+install(TARGETS map_manager_component pose_graph_manager_component global_descriptor_component
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin)
+
+file(GENERATE
+OUTPUT
+"${CMAKE_CURRENT_BINARY_DIR}/test_ament_index/$<CONFIG>/share/ament_index/resource_index/node_plugin/${PROJECT_NAME}"
+CONTENT "${node_plugins}")
 
 # Install nodes
 install(

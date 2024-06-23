@@ -4,7 +4,7 @@
 using namespace cslam;
 
 template <class DataHandlerType>
-MapManager<DataHandlerType>::MapManager(std::shared_ptr<rclcpp::Node> &node)
+MapManager<DataHandlerType>::MapManager(rclcpp::Node * node)
     : node_(node), local_data_handler_(node) {
 
   node_->get_parameter("max_nb_robots", max_nb_robots_);

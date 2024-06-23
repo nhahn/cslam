@@ -35,7 +35,7 @@ namespace cslam
      * 
      */
     public:
-        Logger(std::shared_ptr<rclcpp::Node> &node, const unsigned int &robot_id, const unsigned int &max_nb_robots, const std::string &log_folder);
+        Logger(rclcpp::Node *node, const unsigned int &robot_id, const unsigned int &max_nb_robots, const std::string &log_folder);
 
         void add_pose_graph_log_info(const cslam_common_interfaces::msg::PoseGraph &msg);
 
@@ -78,7 +78,7 @@ namespace cslam
         std::vector<std::pair<std::pair<gtsam::LabeledSymbol, gtsam::LabeledSymbol>, double>> compute_inter_robot_loop_closure_errors(const gtsam::NonlinearFactorGraph::shared_ptr &graph,
                                                  const gtsam::Values::shared_ptr &result);
 
-        std::shared_ptr<rclcpp::Node> node_;
+        rclcpp::Node * node_;
 
         std::string log_folder_;
         unsigned int robot_id_, origin_robot_id_, max_nb_robots_;

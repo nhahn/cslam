@@ -50,10 +50,10 @@ int main(int argc, char **argv) {
 
   std::shared_ptr<IMapManager> handler;       
   if (sensor_type == "stereo") {
-    handler = std::make_shared<MapManager<StereoHandler>>(node);
+    handler = std::make_shared<MapManager<StereoHandler>>(node.get());
   } 
   else if (sensor_type == "rgbd") {
-    handler = std::make_shared<MapManager<RGBDHandler>>(node);
+    handler = std::make_shared<MapManager<RGBDHandler>>(node.get());
   } 
   else {
     RCLCPP_ERROR(node->get_logger(), "Sensor type not supported: %s",
