@@ -61,9 +61,9 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
     auto val = node_->get_parameter("rtabmap." + x.first);
     rtabmap_parameters.insert_or_assign(x.first, val.as_string());
   }
-  auto modelPath = std::filesystem::path(ament_index_cpp::get_package_share_directory("super_point_inference"));
-  modelPath /= "../weights/SuperPointNet.pt";
-  superpoint = std::make_shared<SuperPoint>(modelPath);
+  // auto modelPath = std::filesystem::path(ament_index_cpp::get_package_share_directory("super_point_inference"));
+  // modelPath /= "../weights/SuperPointNet.pt";
+  // superpoint = std::make_shared<SuperPoint>(modelPath);
 
   if (keyframe_generation_ratio_threshold_ > 0.99)
   {
@@ -421,7 +421,7 @@ void RGBDHandler::sensor_data_to_rgbd_msg(
 {
   rtabmap_msgs::msg::RGBDImage data;
   rtabmap_conversions::rgbdImageToROS(*sensor_data, msg_data, "camera");
-  //rtabmap_conversions::points3fToROS(sensor_data->keypoints3D(), msg_data.points);
+  rtabmap_conversions::points3fToROS(sensor_data->keypoints3D(), msg_data.points);
 }
 
 void RGBDHandler::local_descriptors_request(
