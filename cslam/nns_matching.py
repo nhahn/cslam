@@ -25,7 +25,7 @@ class NearestNeighborsMatching(object):
 
         Args:
             vector (np.array): descriptor
-            item: identification info (e.g., int)
+            item: identification info (e.g., int) --> keyframe ID
         """
         assert vector.ndim == 1
         if self.n >= len(self.data):

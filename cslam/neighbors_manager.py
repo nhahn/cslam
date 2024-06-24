@@ -84,6 +84,8 @@ class NeighborManager():
 
         return from_kf_id + 1
 
+    # Two for loops feel repetitive, could condense into one for loop
+    # Choose earliest match idx that hasn't been sent yet
     def select_from_which_match_to_send(self, latest_local_match_idx):
         """This function finds the range of matches to send
         so that we do not loose info
@@ -153,10 +155,11 @@ class NeighborManager():
         Returns:
             range: indexes in list to process
         """
-        other_robot_id = descriptors[0].robot_id
-        kf_ids = [d.keyframe_id for d in descriptors]
-        last_id = max(kf_ids)
+        other_robot_id = descriptors[0].robot_id # which robot the message came from
+        kf_ids = [d.keyframe_id for d in descriptors] # keyframes they sent
+        last_id = max(kf_ids) # last keyframe
 
+        # Keep the new keyframes only
         list_index_range = [
             i for i in range(len(descriptors)) if descriptors[i].keyframe_id >
             self.neighbors_monitors[other_robot_id].last_keyframe_received
@@ -166,6 +169,8 @@ class NeighborManager():
             other_robot_id,
             max(self.neighbors_monitors[other_robot_id].last_keyframe_received,
                 last_id))
+        
+        # Return indices of new keyframes only (not messages themselves)
         return list_index_range
 
     def get_current_neighbors_callback(self, msg):

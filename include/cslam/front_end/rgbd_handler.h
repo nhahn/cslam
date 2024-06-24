@@ -129,6 +129,33 @@ namespace cslam
             rtabmap_msgs::msg::RGBDImage &msg_data);
 
         /**
+         * @brief Run FLANN algorithm to match feature descriptors
+         *
+         * @param prev_desc Feature descriptors from frame k-1
+         * @param curr_desc Feature descriptors from frame k
+         * @param good_matches Good feature matches found between frames k-1 and k
+         */
+        void
+        match_features(
+            const cv::Mat &prev_desc, 
+            const cv::Mat &curr_desc,
+            std::vector<cv::DMatch> &good_matches);
+            
+        /**
+         * @brief Distinguish between static and dynamic keypoints
+         *
+         * @param prev_frame Full frame data from frame k-1
+         * @param curr_frame Full frame data from frame k
+         * @param transform Transformation (translation and rotation) 
+         *                  from frame k-1 to frame k
+         */
+        std::tuple<std::vector<cv::KeyPoint>, std::vector<cv::Point3f>, cv::Mat>
+        classify_static_dynamic_keypts(
+            std::shared_ptr<rtabmap::Signature> &prev_frame, 
+            std::shared_ptr<rtabmap::Signature> &curr_frame, 
+            std::shared_ptr<rtabmap::Transform> &transform);
+        
+        /**
          * @brief Generate a new keyframe according to the policy
          *
          * @param keyframe Sensor data
@@ -231,6 +258,12 @@ namespace cslam
             cslam_common_interfaces::msg::LocalDescriptorsRequest>::SharedPtr
             send_local_descriptors_subscriber_;
 
+        // Added for getting more detailed information about detected objects for MOT
+        // Won't build until StrongSORT repo added to overall stack
+        rclcpp::Subscription<
+            Yolov7_StrongSORT_OSNet::msg::CroppedLocalDescriptorRequestArray>::SharedPtr
+            send_mot_local_desc_subscriber_;
+
         rclcpp::Publisher<
             cslam_common_interfaces::msg::LocalImageDescriptors>::SharedPtr
             local_descriptors_publisher_,
@@ -241,6 +274,9 @@ namespace cslam
 
         rclcpp::Publisher<cslam_common_interfaces::msg::KeyframeOdom>::SharedPtr
             keyframe_odom_publisher_;
+
+        rclcpp::Publisher<Yolov7_StrongSORT_OSNet::msg::KeyframeOdomRGB>::SharedPtr
+            keyframe_rgb_odom_pub_;
 
         rclcpp::Publisher<cslam_common_interfaces::msg::VizPointCloud>::SharedPtr
             keyframe_pointcloud_publisher_;

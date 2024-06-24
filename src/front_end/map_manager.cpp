@@ -14,6 +14,8 @@ MapManager<DataHandlerType>::MapManager(std::shared_ptr<rclcpp::Node> &node)
 
   std::chrono::milliseconds period(map_manager_process_period_ms_);
 
+  // Every few milliseconds, process new sensor data (ie compute local descriptors, 
+  // generate new keyframe)
   process_timer_ = node_->create_wall_timer(
       std::chrono::milliseconds(period),
       std::bind(&MapManager<DataHandlerType>::process_new_sensor_data, this));

@@ -68,10 +68,10 @@ class Broker(object):
         Either using vertex cover or simple dialog strategy.
 
         Args:
-            use_vertex_cover (bool): use vertex cover stratehy
+            use_vertex_cover (bool): use vertex cover strategy
 
         Returns:
-            List(set((int,int)): Vertices to be transmitted
+            List(set((int,int)): Vertices (robot ID, keyframe ID) to be transmitted
         """
         if self.is_multi_robot_graph:
             if use_vertex_cover:

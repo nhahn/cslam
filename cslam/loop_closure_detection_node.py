@@ -94,6 +94,8 @@ class LoopClosureDetection(Node):
         self.params["evaluation.enable_sparsification_comparison"] = self.get_parameter(
             'evaluation.enable_sparsification_comparison').value
 
+        # Every 5 seconds (or how often the parameter is above), run MAC and Vertex Cover 
+        # to detect inter-robot loop closures
         self.glcd = GlobalDescriptorLoopClosureDetection(
             self.params, self)
         self.inter_robot_detection_timer = self.create_timer(

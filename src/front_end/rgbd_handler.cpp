@@ -10,6 +10,11 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/passthrough.h>
 
+// For keypoint classification
+// #include <opencv2/features2d.hpp> // For ORB
+#include <opencv2/opencv.hpp>
+#include <cmath>
+
 using namespace rtabmap;
 using namespace cslam;
 
@@ -100,14 +105,25 @@ RGBDHandler::RGBDHandler(std::shared_ptr<rclcpp::Node> &node)
       node_->create_publisher<cslam_common_interfaces::msg::KeyframeOdom>(
           "cslam/keyframe_odom", 100);
 
-  // Local matches subscription
+  // TODO import into repo correctly 
+  keyframe_rgb_odom_pub_ = 
+      node_->create_publisher<Yolov7_StrongSORT_OSNet::msg::KeyframeOdomRGB>(
+          "cslam/keyframe_rgb_odom", 100);
+
+  // Local matches subscription: publish IntraRobotLoopClosure with intra_robot_loop_closure_publisher_ variable
+  // if there exists a transform between the two intra-robot keyframes
   local_keyframe_match_subscriber_ = node->create_subscription<
       cslam_common_interfaces::msg::LocalKeyframeMatch>(
       "cslam/local_keyframe_match", 100,
       std::bind(&RGBDHandler::receive_local_keyframe_match, this,
                 std::placeholders::_1));
 
-  // Publishers to other robots local descriptors subscribers
+  // Intra-robot loop closure publisher
+  intra_robot_loop_closure_publisher_ = node_->create_publisher<
+      cslam_common_interfaces::msg::IntraRobotLoopClosure>(
+      "cslam/intra_robot_loop_closure", 100);
+
+  // Publishers to other robots' local descriptor subscribers
   std::string local_descriptors_topic = "/cslam/local_descriptors";
   local_descriptors_publisher_ = node_->create_publisher<
       cslam_common_interfaces::msg::LocalImageDescriptors>(local_descriptors_topic, 100);
@@ -121,26 +137,22 @@ RGBDHandler::RGBDHandler(std::shared_ptr<rclcpp::Node> &node)
         "/cslam/viz/keyframe_pointcloud", 100);
   }
 
-  // Subscriber for local descriptors
+  // Subscriber for local descriptors from other robots, publish results in inter_robot_loop_closure_publisher_
+  // variable (InterRobotLoopClosure topic)
   local_descriptors_subscriber_ = node->create_subscription<
       cslam_common_interfaces::msg::LocalImageDescriptors>(
       "/cslam/local_descriptors", 100,
       std::bind(&RGBDHandler::receive_local_image_descriptors, this,
                 std::placeholders::_1));
 
-  // Registration settings
-  rtabmap_parameters.insert_or_assign(rtabmap::Parameters::kVisMinInliers(), std::to_string(min_inliers_));
-  registration_.parseParameters(rtabmap_parameters);
-
-  // Intra-robot loop closure publisher
-  intra_robot_loop_closure_publisher_ = node_->create_publisher<
-      cslam_common_interfaces::msg::IntraRobotLoopClosure>(
-      "cslam/intra_robot_loop_closure", 100);
-
   // Publisher for inter robot loop closure to all robots
   inter_robot_loop_closure_publisher_ = node_->create_publisher<
       cslam_common_interfaces::msg::InterRobotLoopClosure>(
       "/cslam/inter_robot_loop_closure", 100);
+
+  // Registration settings
+  rtabmap_parameters.insert_or_assign(rtabmap::Parameters::kVisMinInliers(), std::to_string(min_inliers_));
+  registration_.parseParameters(rtabmap_parameters);
 
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -314,6 +326,8 @@ void RGBDHandler::compute_local_descriptors(
     }
   }
 
+  // All keypoints (static and dynamic) detected here and indirectly sent to 
+  // topics "cslam/keyframe_data" and "cslam/keyframe_odom"
   auto detector = rtabmap::Feature2D::create(rtabmap_parameters);
 
   auto kpts = detector->generateKeypoints(image, depth_mask);
@@ -321,6 +335,80 @@ void RGBDHandler::compute_local_descriptors(
   auto kpts3D = detector->generateKeypoints3D(*frame_data, kpts);
 
   frame_data->setFeatures(kpts, kpts3D, descriptors);
+}
+
+void match_features(const cv::Mat &prev_desc, const cv::Mat &curr_desc, std::vector<cv::DMatch> &good_matches) {
+  std::vector<std::vector<cv::DMatch>> matches;
+
+  cv::FlannBasedMatcher matcher = cv::FlannBasedMatcher(cv::makePtr<cv::flann::LshIndexParams>(12, 20, 2));
+
+  if (prev_desc.type() != CV_32F) {
+    prev_desc.convertTo(prev_desc, CV_32F);
+  }
+
+  if (curr_desc.type() != CV_32F) {
+    curr_desc.convertTo(curr_desc, CV_32F);
+  }
+
+  matcher.knnMatch(prev_desc, curr_desc, matches, 2);
+
+  // Second neighbor test
+  for (unsigned int i = 0; i < matches.size(); ++i) {
+    if (matches[i][0].distance < matches[i][1].distance * 0.75) {
+      good_matches.push_back(matches[i][0]);
+    }
+  }
+}
+
+// TODO run through example with rtabmap to see if this is feasible, and tune the value epsilon accordingly
+// Not returning static descriptors right now because it isn't directly related to object tracking
+// If static feature keypoints were also explicitly calculated, they could improve the accuracy of Swarm SLAM with minimal additional overhead
+std::tuple<std::vector<cv::KeyPoint>, std::vector<cv::Point3f>, cv::Mat> RGBDHandler::classify_static_dynamic_keypts(
+                                                std::shared_ptr<rtabmap::Signature> &prev_frame, 
+                                                std::shared_ptr<rtabmap::Signature> &curr_frame, 
+                                                std::shared_ptr<rtabmap::Transform> &transform) {
+  // Possibly don't need all three values, but keeping them here for now
+  std::tuple<std::vector<cv::KeyPoint>, std::vector<cv::Point3f>, cv::Mat> prev_info 
+          {prev_frame.sensorData().keypoints(), prev_frame.sensorData().keypoints3D(), prev_frame.sensorData().descriptors()};
+  std::tuple<std::vector<cv::KeyPoint>, std::vector<cv::Point3f>, cv::Mat> curr_info 
+          {curr_frame.sensorData().keypoints(), curr_frame.sensorData().keypoints3D(), curr_frame.sensorData().descriptors()};
+  
+  std::vector<cv::DMatch> matches;
+  match_features(std::get<2>(prev_info), std::get<2>(curr_info), matches);
+
+  // Adjust for translation and rotation
+  cv::Mat translation_mtx = transform->translationMatrix();
+  cv::Matx33f rotation_mtx = cv::Matx33f(transform->rotationMatrix());
+
+  std::vector<int> useful_features_prev;
+  std::vector<int> useful_features_curr;
+  for (auto iter : matches) {
+    useful_features_prev.push_back(iter.queryIdx);
+    useful_features_curr.push_back(iter.trainIdx);
+  }
+
+  std::tuple<std::vector<cv::KeyPoint>, std::vector<cv::Point3f>, cv::Mat> dynamic_keypts 
+          {std::vector<cv::KeyPoint>, std::vector<cv::Point3f>, cv::Mat};
+  for (std::vector<int>::iterator iter = useful_features_prev.begin(); iter != useful_features_prev.end(); ++iter) {
+    std::get<1>(prev_info)[useful_features_prev[*iter]]->x += translation_mtx[0][0];
+    std::get<1>(prev_info)[useful_features_prev[*iter]]->y += translation_mtx[0][1];
+    std::get<1>(prev_info)[useful_features_prev[*iter]]->z += translation_mtx[0][2];
+
+    std::get<1>(prev_info)[useful_features_prev[*iter]] = rotation_mtx * std::get<1>(prev_info)[useful_features_prev[*iter]];
+
+    // Could use idea of 'good matches' from https://docs.opencv.org/2.4/doc/tutorials/features2d/feature_flann_matcher/feature_flann_matcher.html
+    float epsilon = 250; //Arbitrary value to account for classification into static and dynamic points
+
+    if (cmath::pow(std::get<1>(curr_info)[*iter]->x - std::get<1>(prev_info)[*iter]->x, 2) + 
+        cmath::pow(std::get<1>(curr_info)[*iter]->y - std::get<1>(prev_info)[*iter]->y, 2) + 
+        cmath::pow(std::get<1>(curr_info)[*iter]->z - std::get<1>(prev_info)[*iter]->z, 2) > epsilon) {
+      std::get<0>(dynamic_keypts).push_back(std::get<0>(curr_info)[*iter]);
+      std::get<1>(dynamic_keypts).push_back(std::get<1>(curr_info)[*iter]);
+      // TODO get this specific column and add it to the matrix object
+    }
+  }
+
+  return dynamic_keypts;
 }
 
 bool RGBDHandler::generate_new_keyframe(std::shared_ptr<rtabmap::SensorData> &keyframe)
@@ -334,6 +422,12 @@ bool RGBDHandler::generate_new_keyframe(std::shared_ptr<rtabmap::SensorData> &ke
       try
       {
         rtabmap::RegistrationInfo reg_info;
+
+        // Compute transformation between keypoints in previous keyframe and current one
+        // In the process: set keypoints for both curr and prev SensorData messages (in Optical Flow Case)
+
+        // Does it use Optical Flow or Feature Matching for our purposes? 
+        // Line 188: https://docs.ros.org/en/kinetic/api/rtabmap/html/Registration_8cpp_source.html
         rtabmap::Transform t = registration_.computeTransformation(
             *keyframe, *previous_keyframe_, rtabmap::Transform(), &reg_info);
         if (!t.isNull())
@@ -345,6 +439,15 @@ bool RGBDHandler::generate_new_keyframe(std::shared_ptr<rtabmap::SensorData> &ke
             generate_new_keyframe = false;
           }
         }
+
+        // Call function to extract static vs dynamic keypoints and place them somewhere
+        // TODO finish/debug this
+        // std::tuple<std::vector<cv::KeyPoint>, std::vector<cv::Point3f>, cv::Mat>> dynamic_keypoints = 
+        //     classify_static_dynamic_keypts(fromKeyframe, toKeyframe, *t);
+
+        // if (!std::get<0>(dynamic_keypoints).is_empty()) {
+        //   // TODO figure out how to send to the next stage in the process, distributed somehow 
+        // }
       }
       catch (std::exception &e)
       {
@@ -362,6 +465,9 @@ bool RGBDHandler::generate_new_keyframe(std::shared_ptr<rtabmap::SensorData> &ke
   return generate_new_keyframe;
 }
 
+// Is called every few milliseconds, computes local descriptors and stores it in SensorData message, 
+// only sends off image and robot ID for global descriptor classification, and inserts in dictionary 
+// for local descriptor generation
 void RGBDHandler::process_new_sensor_data()
 {
   if (!received_data_queue_.empty())
@@ -380,6 +486,7 @@ void RGBDHandler::process_new_sensor_data()
       // Compute local descriptors
       compute_local_descriptors(sensor_data.first);
 
+      // The .first unpacks pair
       bool generate_keyframe = generate_new_keyframe(sensor_data.first);
       if (generate_keyframe)
       {
@@ -414,12 +521,15 @@ void RGBDHandler::sensor_data_to_rgbd_msg(
   //rtabmap_conversions::points3fToROS(sensor_data->keypoints3D(), msg_data.points);
 }
 
+// Send local descriptor data upon request for it (global match ended up successful and 
+// minimal)
 void RGBDHandler::local_descriptors_request(
     cslam_common_interfaces::msg::LocalDescriptorsRequest::
         ConstSharedPtr request)
 {
   // Fill msg
   cslam_common_interfaces::msg::LocalImageDescriptors msg;
+  // Remove costly, unprocessed data 
   clear_sensor_data(local_descriptors_map_.at(request->keyframe_id));
   sensor_data_to_rgbd_msg(local_descriptors_map_.at(request->keyframe_id),
                           msg.data);
@@ -566,6 +676,7 @@ void RGBDHandler::receive_local_image_descriptors(
   }
 }
 
+// This seems to be for sending general first image
 void RGBDHandler::send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data)
 {
   cv::Mat rgb;
@@ -591,6 +702,13 @@ void RGBDHandler::send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorD
   odom_msg.id = keypoints_data.first->id();
   odom_msg.odom = *keypoints_data.second;
   keyframe_odom_publisher_->publish(odom_msg);
+
+  Yolov7_StrongSORT_OSNet::msg::KeyframeOdomRGB combined_msg;
+  combined_msg.robot_id = robot_id_;
+  combined_msg.keyframe_id = keypoints_data.first->id();
+  image_bridge.toImageMsg(combined_msg.image);
+  combined_msg.odom = *keypoints_data.second;
+  keyframe_rgb_odom_pub_->publish(combined_msg);
 
   if (enable_visualization_)
   {
@@ -624,6 +742,14 @@ void RGBDHandler::send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorD
   odom_msg.odom = *keypoints_data.second;
   odom_msg.gps = gps_data;
   keyframe_odom_publisher_->publish(odom_msg);
+  
+  // Can probably replace this with adding std_msgs/Header to KeyframeRGB and KeyframeOdom
+  Yolov7_StrongSORT_OSNet::msg::KeyframeOdomRGB combined_msg;
+  combined_msg.robot_id = robot_id_;
+  combined_msg.keyframe_id = keypoints_data.first->id();
+  image_bridge.toImageMsg(combined_msg.image);
+  combined_msg.odom = *keypoints_data.second;
+  keyframe_rgb_odom_pub_->publish(combined_msg);
 
   if (enable_visualization_)
   {

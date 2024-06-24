@@ -33,6 +33,10 @@ class LoopClosureSparseMatching(object):
         self.candidate_selector = AlgebraicConnectivityMaximization(
             self.params['robot_id'], self.params['max_nb_robots'], extra_params=self.params)
 
+    # 4, continued from global_descriptor_loop_closure_detection.py) Iterate through every other robot's 
+    # global descriptors (is this all global descriptors over time?) and find the closest match for each 
+    # other robot; if that closest match is similar enough, add it as a potential match for maximizing 
+    # the graph connectivity
     def add_local_global_descriptor(self, embedding, keyframe_id):
         """ Add a local keyframe for matching
 
@@ -53,17 +57,20 @@ class LoopClosureSparseMatching(object):
                         matches.append(match)
         return matches
 
+    # From callback for global_descriptor_subscriber
     def add_other_robot_global_descriptor(self, msg):
         """ Add keyframe global descriptor info from other robot
 
         Args:
             msg (cslam_common_interfaces.msg.GlobalDescriptor): global descriptor info
         """
+        descriptor = np.asarray(msg.descriptor)
+        
         self.other_robots_nnsm[msg.robot_id].add_item(
-            np.asarray(msg.descriptor), msg.keyframe_id)
+            descriptor, msg.keyframe_id)
 
         match = None
-        kf, similarity = self.local_nnsm.search_best(np.asarray(msg.descriptor))
+        kf, similarity = self.local_nnsm.search_best(descriptor)
         if kf is not None:   
             if similarity >= self.params['frontend.similarity_threshold']:
                 match = EdgeInterRobot(self.params['robot_id'], kf, msg.robot_id,
@@ -71,6 +78,8 @@ class LoopClosureSparseMatching(object):
                 self.candidate_selector.add_match(match)
         return match
 
+    # 6, continued from global_descriptor_loop_closure_detection.py) Search best matches list for 
+    # this specific agent, return keyframe descriptors of last time it was in this specific area, if any
     def match_local_loop_closures(self, descriptor, kf_id):
         kfs, similarities = self.local_nnsm.search(descriptor,
                                          k=self.params['frontend.nb_best_matches'])
