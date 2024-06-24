@@ -63,6 +63,7 @@ class GlobalDescriptorLoopClosureDetection(object):
         self.params[
             'frontend.global_descriptors_topic'] = '/cslam/' + self.node.get_parameter(
                 'frontend.global_descriptors_topic').value
+        # Periodically publish sorted dict of (keyframe ID, GlobalDescriptor message) to nearby robots
         self.global_descriptor_publisher = self.node.create_publisher(
             GlobalDescriptors,
             self.params['frontend.global_descriptors_topic'], 100)
@@ -71,18 +72,24 @@ class GlobalDescriptorLoopClosureDetection(object):
             self.params['frontend.global_descriptors_topic'],
             self.global_descriptor_callback, 100)
 
+        # Publish InterRobotMatches messages (happens every clock cycle with lf.inter_robot_matches_timer)
         self.params[
             'frontend.inter_robot_matches_topic'] = '/cslam/' + self.node.get_parameter(
                 'frontend.inter_robot_matches_topic').value
         self.inter_robot_matches_publisher = self.node.create_publisher(
             InterRobotMatches,
             self.params['frontend.inter_robot_matches_topic'], 100)
+        
+        # Get InterRobotMatches messages and add to algebraic connectivity maximization graph
         self.inter_robot_matches_subscriber = self.node.create_subscription(
             InterRobotMatches,
             self.params['frontend.inter_robot_matches_topic'],
             self.inter_robot_matches_callback, 100)
 
+        # 1) Subscribe to keyframe topics from rgb_handler.cpp and a similar version for lidar
+        # Call callback function: receive_keyframe
         if self.keyframe_type == "rgb":
+            # # KeyframeRGB ID is keyframe ID, NOT robot ID
             self.receive_keyframe_subscriber = self.node.create_subscription(
                 KeyframeRGB, 'cslam/keyframe_data', self.receive_keyframe, 100)
         elif self.keyframe_type == "pointcloud":
@@ -95,10 +102,13 @@ class GlobalDescriptorLoopClosureDetection(object):
         self.local_match_publisher = self.node.create_publisher(
             LocalKeyframeMatch, 'cslam/local_keyframe_match', 100)
 
+        # Inter robot loop closure confirmed, update alg connectivity maximization graph
         self.receive_inter_robot_loop_closure_subscriber = self.node.create_subscription(
             InterRobotLoopClosure, '/cslam/inter_robot_loop_closure',
             self.receive_inter_robot_loop_closure, 100)
 
+        # Send message to every robot in range that has a high global descriptor match with the 
+        # current robot (if it's the broker) requesting for the more expensive local descriptors
         self.local_descriptors_request_publishers = {}
         for i in range(self.params['max_nb_robots']):
             self.local_descriptors_request_publishers[
@@ -111,6 +121,8 @@ class GlobalDescriptorLoopClosureDetection(object):
             self.node, self.params)
 
         self.global_descriptors_buffer = SortedDict()
+        
+        # Every clock cycle, publishes to self.params['frontend.global_descriptors_topic']
         self.global_descriptors_timer = self.node.create_timer(
             self.params['frontend.detection_publication_period_sec'],
             self.global_descriptors_timer_callback,
@@ -118,7 +130,10 @@ class GlobalDescriptorLoopClosureDetection(object):
         )  # Note: It is important to use the system clock instead of ROS clock for timers since we are within a TimerAction
 
         self.inter_robot_matches_buffer = SortedDict()
+        # Number of inter robot matches found so far, incremented every time a new high similarity global descriptor match is found (in add_global_descriptor_to_map)
         self.nb_inter_robot_matches = 0
+        
+        # Every clock cycle, publish InterRobotMatches messages
         self.inter_robot_matches_timer = self.node.create_timer(
             self.params['frontend.detection_publication_period_sec'],
             self.inter_robot_matches_timer_callback,
@@ -145,6 +160,7 @@ class GlobalDescriptorLoopClosureDetection(object):
 
         self.gpu_start_time = time.time() 
 
+    # 3) 
     def add_global_descriptor_to_map(self, embedding, kf_id):
         """ Add global descriptor to matching list
 
@@ -153,8 +169,10 @@ class GlobalDescriptorLoopClosureDetection(object):
             kf_id (int): keyframe ID
         """
         # Add for matching
+        # EdgeInterRobot list of global descriptor matching with highest similarities
         matches = self.lcm.add_local_global_descriptor(embedding, kf_id)
-        # Local matching
+        # Use global descriptor for local matching and publish to "cslam/local_keyframe_match" 
+        # topic in step 5
         self.detect_intra(embedding, kf_id)
 
         # Store global descriptor
@@ -216,6 +234,8 @@ class GlobalDescriptorLoopClosureDetection(object):
                             global_descriptors.descriptors[0].descriptor
                         ) * 4  # bytes
 
+            # Clears sorted dictionary, essentially, since all descriptors have already been 
+            # sent out to the neighboring robots
             self.delete_useless_descriptors()
             if self.params["evaluation.enable_logs"]:
                 self.log_publisher.publish(
@@ -278,6 +298,7 @@ class GlobalDescriptorLoopClosureDetection(object):
                     self.log_detection_cumulative_communication += len(
                         inter_robot_matches.matches) * 20  # bytes
 
+            # Delete matches that have already been sent out
             self.delete_useless_inter_robot_matches()
             if self.params["evaluation.enable_logs"]:
                 self.log_publisher.publish(
@@ -285,6 +306,8 @@ class GlobalDescriptorLoopClosureDetection(object):
                              value=str(
                                  self.log_detection_cumulative_communication)))
 
+    # 5) Wrapper for publishing the last time the robot was in this specific location 
+    # (had a loop closure) to "cslam/local_keyframe_match" topic
     def detect_intra(self, embedding, kf_id):
         """ Detect intra-robot loop closures
 
@@ -313,23 +336,29 @@ class GlobalDescriptorLoopClosureDetection(object):
         )
         #self.node.get_logger().info('Neighbors in range: ' +  str(neighbors_in_range_list))
         # Check if the robot is the broker
+        
+        # At least one neighbor and this robot is the broker (ie has the lowest ID, for now)
+        # Maximize connectivity in graph and then use vertex cover to figure out how to share the costly info 
+        # (local descriptors) with as little network usage as possible
         if len(neighbors_in_range_list
                ) > 0 and self.neighbor_manager.local_robot_is_broker():
             if self.params["evaluation.enable_logs"]: start_time = time.time()
-            # Find matches that maximize the algebraic connectivity
+            # Find matches that maximize the algebraic connectivity: returns list(EdgeInterRobot)
             selection = self.lcm.select_candidates(
                 self.params["frontend.inter_robot_loop_closure_budget"],
                 neighbors_is_in_range)
             
             # Extract and publish local descriptors
-            vertices_info = self.edge_list_to_vertices(selection)
+            # Vertices_info returns dict((int, int), list(int), list(int))
+            vertices_info = self.edge_list_to_vertices(selection) 
             broker = Broker(selection, neighbors_in_range_list)
-            for selected_vertices_set in broker.brokerage(
+            # Computes vertex cover in broker.brokerage
+            for selected_vertices_set in broker.brokerage(  
                     self.params["frontend.use_vertex_cover_selection"]):
                 for v in selected_vertices_set:
                     # Call to send publish local descriptors
                     msg = LocalDescriptorsRequest()
-                    msg.keyframe_id = v[1]
+                    msg.keyframe_id = v[1] # v[0] is robot ID
                     msg.matches_robot_id = vertices_info[v][0]
                     msg.matches_keyframe_id = vertices_info[v][1]
                     self.local_descriptors_request_publishers[v[0]].publish(
@@ -382,6 +411,8 @@ class GlobalDescriptorLoopClosureDetection(object):
                 vertices[key1] = [[s.robot0_id], [s.robot0_keyframe_id]]
         return vertices
 
+    # 2) Get new keypoints, get global image descriptor (high level characteristics of image that form a vector), 
+    # and add to map (with add_global_descriptor_to_map function)
     def receive_keyframe(self, msg):
         """Callback to add a keyframe 
 
