@@ -31,7 +31,7 @@ class NearestNeighborsMatching(object):
                 self.dim = len(vector)
                 self.data = torch.zeros((1000, self.dim), dtype=torch.float32, device=torch.device('cuda'))
             else:
-                torch.reshape(self.data, (2 * self.data.shape[0], self.dim))
+                self.data = torch.concat((self.data, torch.zeros(self.data.shape[0], self.data.shape[1]), 0))
 
         self.items[self.n] = item
         self.data[self.n] = vector.reshape(1,self.dim).to(self.device)

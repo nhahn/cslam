@@ -12,7 +12,6 @@ from numba import jit, njit
 # Define Edge container
 Edge = namedtuple('Edge', ['i', 'j', 'weight'])
 
-@njit
 def nx_to_mac(G: nx.Graph) -> List[Edge]:
     """Returns the list of edges in the graph G
 
@@ -28,7 +27,6 @@ def nx_to_mac(G: nx.Graph) -> List[Edge]:
         edges.append(edge)
     return edges
 
-@njit
 def mac_to_nx(edges: List[Edge]) -> nx.Graph:
     """returns the graph corresponding to the list of edges
 
@@ -43,7 +41,6 @@ def mac_to_nx(edges: List[Edge]) -> nx.Graph:
         G.add_edge(edge.i, edge.j, weight=edge.weight)
     return G
 
-@njit
 def weight_graph_lap_from_edge_list(edges: List[Edge],
                                     num_vars: int) -> csr_matrix:
     """Returns the (sparse) weighted graph Laplacian matrix from the list of edges
@@ -83,7 +80,6 @@ def weight_graph_lap_from_edge_list(edges: List[Edge],
     return csr_matrix(
         coo_matrix((data, (rows, cols)), shape=[num_vars, num_vars]))
 
-@njit
 def weight_graph_lap_from_edges(edges: List[Edge], weights: List[int],
                                 num_poses: int) -> csr_matrix:
     """Returns the sparse rotational weighted graph Laplacian matrix from a list

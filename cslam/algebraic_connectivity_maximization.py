@@ -5,7 +5,6 @@ import numpy as np
 from cslam.mac.mac import MAC
 from cslam.mac.utils import Edge, weight_graph_lap_from_edge_list
 
-
 class EdgeInterRobot(NamedTuple):
     """ Inter-robot loop closure edge
     """

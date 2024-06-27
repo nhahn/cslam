@@ -77,7 +77,7 @@ class LoopClosureSparseMatching(object):
         tensor = torch.from_numpy(np.asarray(descriptor).astype(np.float32)).cuda()
         kfs, similarities = self.local_nnsm.search(tensor,
                                          k=self.params['frontend.nb_best_matches'])
-
+        
         if len(kfs) > 0 and kfs[0] == kf_id:
             kfs, similarities = kfs[1:], similarities[1:]
         if len(kfs) == 0:
@@ -91,7 +91,7 @@ class LoopClosureSparseMatching(object):
             if similarity < self.params['frontend.similarity_threshold']:
                 continue
 
-            return kf, kfs
+            return kf, similarity
         return None, None
 
     def select_candidates(self,

@@ -16,7 +16,6 @@ from cslam.mac.utils import *
 MACResult = namedtuple(
     'MACResult', ['w', 'F_unrounded', 'objective_values', 'duality_gaps'])
 
-@jitclass
 class MAC:
 
     def __init__(self, fixed_measurements, candidate_measurements, num_poses):

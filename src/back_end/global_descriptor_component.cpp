@@ -5,7 +5,6 @@
 #include <memory>
 #include <tuple>
 #include <rclcpp/rclcpp.hpp>
-#include <torchvision/vision.h>
 #include "cslam_common_interfaces/msg/keyframe_rgb.hpp"
 #include "cslam_common_interfaces/msg/global_descriptor.hpp"
 #include <cv_bridge/cv_bridge.h>
@@ -106,7 +105,7 @@ namespace cslam {
             global_descriptor_publisher;
 
         bool initialized;
-        GpuMat cvtColorMat, floatMat; 
+        GpuMat cvtColorMat, floatMat, image; 
         Stream stream;
         cslam::Model model;
 
@@ -114,7 +113,7 @@ namespace cslam {
         void receive_keyframe(const std::shared_ptr<const cslam_common_interfaces::msg::KeyframeRGB> keyframe_msg) {
             
             cv_bridge::CvImageConstPtr keyframe = cv_bridge::toCvShare(keyframe_msg->image, keyframe_msg);
-            GpuMat image = GpuMat(keyframe->image);
+            image.upload(keyframe->image, stream);
             if (!initialized) {
                 cvtColorMat = cv::cuda::GpuMat(image.size(), CV_8UC3);
                 floatMat = cv::cuda::GpuMat(image.size(), CV_32FC3);
@@ -128,7 +127,7 @@ namespace cslam {
             }
 
             cvtColorMat.convertTo(floatMat, CV_32FC3, 1.0 / 255.0, 0.0, stream);
-           
+            stream.waitForCompletion();
             auto options = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA).requires_grad(false);
             const at::Tensor tensorImage = torch::from_blob(floatMat.data, {floatMat.rows, floatMat.cols, 3}, options);
             auto permuted = tensorImage.permute({2, 0, 1});

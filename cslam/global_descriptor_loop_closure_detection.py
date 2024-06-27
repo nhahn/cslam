@@ -229,7 +229,7 @@ class GlobalDescriptorLoopClosureDetection(object):
         msg.robot0_keyframe_id = edge.robot0_keyframe_id
         msg.robot1_id = edge.robot1_id
         msg.robot1_keyframe_id = edge.robot1_keyframe_id
-        msg.weight = edge.weight
+        msg.weight = float(edge.weight)
         return msg
 
     def inter_robot_matches_timer_callback(self):
