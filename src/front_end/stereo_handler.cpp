@@ -329,6 +329,7 @@ void StereoHandler::stereo_callback(
           : image_rect_right->header.stamp;
 
   Transform localTransform(0,0,0,0,0,0);
+  //Transform localTransform = rtabmap::CameraModel::opticalRotation();
   if (base_frame_id_ != "")
   {
 		localTransform = rtabmap_conversions::getTransform(

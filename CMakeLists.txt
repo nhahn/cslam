@@ -53,10 +53,6 @@ find_package(rtabmap_conversions REQUIRED)
 find_package(super_point_inference REQUIRED)
 find_package(Torch REQUIRED)
 
-find_package(vpi REQUIRED)
-find_package(isaac_ros_managed_nitros REQUIRED)
-find_package(isaac_ros_common REQUIRED)
-find_package(isaac_ros_nitros_image_type REQUIRED)
 find_package(RTABMap REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 
@@ -114,10 +110,6 @@ SET(Libraries
   #  rtabmap_ros
    rtabmap_msgs
    rtabmap_conversions
-   
-   isaac_ros_managed_nitros
-   isaac_ros_common
-   isaac_ros_nitros_image_type
 )
 
 find_package(cslam_common_interfaces REQUIRED)

@@ -369,6 +369,11 @@ bool RGBDHandler::generate_new_keyframe(std::shared_ptr<rtabmap::SensorData> &ke
       previous_keyframe_ = keyframe;
     }
   }
+  // RCLCPP_WARN(
+  //   node_->get_logger(),
+  //   "Local transform: %s",
+  //    keyframe->stereoCameraModels()[0].localTransform().prettyPrint().c_str());
+ 
   return generate_new_keyframe;
 }
 
@@ -417,11 +422,13 @@ void RGBDHandler::process_new_sensor_data()
 
 void RGBDHandler::sensor_data_to_rgbd_msg(
     const std::shared_ptr<rtabmap::SensorData> sensor_data,
-    rtabmap_msgs::msg::RGBDImage &msg_data)
+    rtabmap_msgs::msg::RGBDImage &msg_data, bool baselinkFrame)
 {
   rtabmap_msgs::msg::RGBDImage data;
   rtabmap_conversions::rgbdImageToROS(*sensor_data, msg_data, "camera");
-  //rtabmap_conversions::points3fToROS(sensor_data->keypoints3D(), msg_data.points);
+  if (baselinkFrame) {
+    rtabmap_conversions::points3fToROS(sensor_data->keypoints3D(), msg_data.points);
+  }
 }
 
 void RGBDHandler::local_descriptors_request(
@@ -626,7 +633,7 @@ void RGBDHandler::send_visualization_keypoints(const std::pair<std::shared_ptr<r
   // visualization message
   auto features_msg = std::make_unique<cslam_common_interfaces::msg::LocalImageDescriptors>();
   sensor_data_to_rgbd_msg(keypoints_data.first,
-                          features_msg->data);
+                          features_msg->data, true);
   features_msg->keyframe_id = keypoints_data.first->id();
   features_msg->robot_id = robot_id_;
   features_msg->data.key_points.clear();

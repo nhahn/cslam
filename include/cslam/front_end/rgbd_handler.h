@@ -127,7 +127,8 @@ namespace cslam
          */
         void sensor_data_to_rgbd_msg(
             const std::shared_ptr<rtabmap::SensorData> sensor_data,
-            rtabmap_msgs::msg::RGBDImage &msg_data);
+            rtabmap_msgs::msg::RGBDImage &msg_data,
+            bool baselinkFrame = false);
 
         /**
          * @brief Generate a new keyframe according to the policy
