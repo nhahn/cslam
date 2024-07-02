@@ -475,28 +475,6 @@ void StereoHandler::stereo_callback(
   }
 }
 
-void StereoHandler::local_descriptors_msg_to_sensor_data(
-    const std::shared_ptr<
-        cslam_common_interfaces::msg::LocalImageDescriptors>
-        msg,
-    rtabmap::SensorData &sensor_data) {
-  // Fill descriptors
-  rtabmap::StereoCameraModel stereo_model =
-      rtabmap_conversions::stereoCameraModelFromROS(msg->data.rgb_camera_info,
-                                            msg->data.depth_camera_info,
-                                            rtabmap::Transform::getIdentity());
-  sensor_data = rtabmap::SensorData(
-      cv::Mat(), cv::Mat(), stereo_model, 0,
-      rtabmap_conversions::timestampFromROS(msg->data.header.stamp));
-
-  std::vector<cv::KeyPoint> kpts;
-  rtabmap_conversions::keypointsFromROS(msg->data.key_points, kpts);
-  std::vector<cv::Point3f> kpts3D;
-  rtabmap_conversions::points3fFromROS(msg->data.points, kpts3D);
-  auto descriptors = rtabmap::uncompressData(msg->data.descriptors);
-  sensor_data.setFeatures(kpts, kpts3D, descriptors);
-}
-
 void StereoHandler::send_visualization(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data)
 {
   send_visualization_keypoints(keypoints_data);

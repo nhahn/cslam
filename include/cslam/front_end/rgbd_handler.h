@@ -29,7 +29,6 @@
 #include <cv_bridge/cv_bridge.h>
 
 #include <chrono>
-#include <super_point_inference.hpp>
 #include <cslam_common_interfaces/msg/keyframe_odom.hpp>
 #include <cslam_common_interfaces/msg/keyframe_rgb.hpp>
 #include <cslam_common_interfaces/msg/viz_point_cloud.hpp>
@@ -50,6 +49,8 @@
 #include <rtabmap_conversions/MsgConversion.h>
 #include "cslam/front_end/sensor_handler_interface.h"
 #include "cslam/front_end/visualization_utils.h"
+#include "lightglue_onnx/LightGlueDecoupleOnnxRunner.hpp"
+#include "lightglue_onnx/Configuration.hpp"
 
 namespace cslam
 {
@@ -113,7 +114,7 @@ namespace cslam
          * @param msg local descriptors
          * @return rtabmap::SensorData&
          */
-        virtual void local_descriptors_msg_to_sensor_data(
+        void local_descriptors_msg_to_sensor_data(
             const std::shared_ptr<
                 cslam_common_interfaces::msg::LocalImageDescriptors>
                 msg,
@@ -127,7 +128,7 @@ namespace cslam
          */
         void sensor_data_to_rgbd_msg(
             const std::shared_ptr<rtabmap::SensorData> sensor_data,
-            rtabmap_msgs::msg::RGBDImage &msg_data,
+            rtabmap_msgs::msg::SensorData &msg_data,
             bool baselinkFrame = false);
 
         /**
@@ -285,7 +286,10 @@ namespace cslam
         std::string global_image_topic_;
 
     private:
-        std::shared_ptr<SuperPoint> superpoint;
+        void setMatches(rtabmap::Signature &from, rtabmap::Signature &to);
+        std::shared_ptr<lightglue::LightGlueDecoupleOnnxRunner> lightglueMatcher;
+        lightglue::Configuration lightglueConfig;
+
         rtabmap::ParametersMap rtabmap_parameters;
         image_transport::SubscriberFilter sub_image_color_;
         message_filters::Subscriber<sensor_msgs::msg::CameraInfo> sub_camera_info_color_;

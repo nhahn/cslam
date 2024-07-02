@@ -42,16 +42,6 @@ namespace cslam
             const nav_msgs::msg::Odometry::ConstSharedPtr odom);
 
         /**
-         * @brief converts descriptors to sensore data
-         *
-         * @param msg local descriptors
-         * @return rtabmap::SensorData&
-         */
-        virtual void local_descriptors_msg_to_sensor_data(
-            const std::shared_ptr<cslam_common_interfaces::msg::LocalImageDescriptors> msg,
-            rtabmap::SensorData &sensor_data);
-
-        /**
          * @brief Send keypoints for visualizations
          * 
          * @param keypoints_data keyframe keypoints data

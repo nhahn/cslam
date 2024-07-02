@@ -50,9 +50,8 @@ find_package(image_geometry REQUIRED)
 # find_package(rtabmap_ros REQUIRED)
 find_package(rtabmap_msgs REQUIRED)
 find_package(rtabmap_conversions REQUIRED)
-find_package(super_point_inference REQUIRED)
 find_package(Torch REQUIRED)
-
+find_package(lightglue_onnx REQUIRED)
 find_package(RTABMap REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 
@@ -80,6 +79,7 @@ include_directories(
   ${rtabmap_conversions_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
   ${GTSAM_INCLUDE_DIR}
+  ${TORCH_INCLUDE_DIRS}
 )
 
 # libraries
@@ -153,8 +153,7 @@ add_library(map_manager_component SHARED
   src/front_end/visualization_utils.cpp
 )
 ament_target_dependencies(map_manager_component 
-  ${Libraries} Torch RTABMap super_point_inference
-  cslam_common_interfaces)
+  ${Libraries} RTABMap cslam_common_interfaces lightglue_onnx)
 rclcpp_components_register_node(map_manager_component PLUGIN "cslam::MapManagerComponent" EXECUTABLE map_manager)
 set(node_plugins "${node_plugins}cslam::MapManagerComponent;$<TARGET_FILE:map_manager_component>\n")
 
@@ -162,8 +161,11 @@ set(global_descriptor_component ${comp}_component)
 add_library(global_descriptor_component SHARED
   src/back_end/global_descriptor_component.cpp
 )
+target_link_libraries(global_descriptor_component ${TORCH_LIBRARIES} "stdc++fs")
+target_link_options(global_descriptor_component PRIVATE ${TORCH_CXX_FLAGS})
+
 ament_target_dependencies(global_descriptor_component 
-  ${Libraries} Torch super_point_inference
+  ${Libraries} Torch 
   cslam_common_interfaces)
 rclcpp_components_register_node(global_descriptor_component PLUGIN "cslam::GlobalDescriptorComponent" EXECUTABLE global_descriptor)
 set(node_plugins "${node_plugins}cslam::GlobalDescriptorComponent;$<TARGET_FILE:global_descriptor_component>\n")

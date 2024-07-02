@@ -25,6 +25,8 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
   node_->declare_parameter<std::string>("frontend.depth_image_topic", "depth/image");
   node_->declare_parameter<std::string>("frontend.color_camera_info_topic",
                                         "color/camera_info");
+  node_->declare_parameter<std::string>("frontend.superpoint_model", "/models/superpoint_1536.onnx");
+  node_->declare_parameter<std::string>("frontend.lightglue_model", "/models/superpoint_lightglue_fused_fp16.onnx");
   node_->declare_parameter<std::string>("frontend.odom_topic", "odom");
   node_->declare_parameter<float>("frontend.keyframe_generation_ratio_threshold", 0.0);
   node_->declare_parameter<std::string>("frontend.sensor_base_frame_id", ""); // If empty we assume that the camera link is the base link
@@ -61,9 +63,14 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
     auto val = node_->get_parameter("rtabmap." + x.first);
     rtabmap_parameters.insert_or_assign(x.first, val.as_string());
   }
-  // auto modelPath = std::filesystem::path(ament_index_cpp::get_package_share_directory("super_point_inference"));
-  // modelPath /= "../weights/SuperPointNet.pt";
-  // superpoint = std::make_shared<SuperPoint>(modelPath);
+  lightglueConfig = lightglue::Configuration{
+    node_->get_parameter("frontend.superpoint_model").as_string(),
+    node_->get_parameter("frontend.lightglue_model").as_string()
+  };
+  lightglueConfig.grayScale = true;
+  lightglueMatcher = std::make_shared<lightglue::LightGlueDecoupleOnnxRunner>();
+  lightglueMatcher->InitOrtEnv(lightglueConfig);
+  lightglueMatcher->SetMatchThresh(lightglueConfig.threshold);
 
   if (keyframe_generation_ratio_threshold_ > 0.99)
   {
@@ -283,6 +290,22 @@ void RGBDHandler::rgbd_callback(
   }
 }
 
+std::vector<cv::Point2f> NormKeypoints(std::vector<cv::KeyPoint> kpts, int h, int w)
+{
+    cv::Size size(w, h);
+    cv::Point2f shift(static_cast<float>(w) / 2, static_cast<float>(h) / 2);
+    float scale = static_cast<float>((std::max)(w, h)) / 2;
+
+    std::vector<cv::Point2f> normalizedKpts;
+    for (const cv::KeyPoint &kpt : kpts)
+    {
+        cv::Point2f normalizedKpt = (kpt.pt - shift) / scale;
+        normalizedKpts.push_back(normalizedKpt);
+    }
+
+    return normalizedKpts;
+}
+
 void RGBDHandler::compute_local_descriptors(
     std::shared_ptr<rtabmap::SensorData> &frame_data)
 {
@@ -320,17 +343,106 @@ void RGBDHandler::compute_local_descriptors(
   }
 
   auto detector = rtabmap::Feature2D::create(rtabmap_parameters);
+  auto extData = lightglueMatcher->Extractor(lightglueConfig, image, 1.0f);
+  std::vector<cv::KeyPoint> keypoints;
+  for( size_t i = 0; i < extData.first.size(); i++ ) {
+    keypoints.push_back(cv::KeyPoint(extData.first[i], 1.f));
+  }
+  auto kpts3D = detector->generateKeypoints3D(*frame_data, keypoints);
 
-  auto kpts = detector->generateKeypoints(image, depth_mask);
-  auto descriptors = detector->generateDescriptors(image, kpts);
-  auto kpts3D = detector->generateKeypoints3D(*frame_data, kpts);
-
-  frame_data->setFeatures(kpts, kpts3D, descriptors);
+  frame_data->setFeatures(keypoints, kpts3D, extData.second);
   
   // auto features = superpoint->getFeatures(image);
   // auto kpts3D = detector->generateKeypoints3D(*frame_data, std::get<0>(features));
 
   // frame_data->setFeatures(std::get<0>(features), kpts3D, std::get<1>(features));
+}
+
+void RGBDHandler::setMatches(rtabmap::Signature &from, rtabmap::Signature &to) {
+  
+  auto origFrom = from.sensorData().keypoints(), origTo = to.sensorData().keypoints();
+  auto kptsFrom3D = from.sensorData().keypoints3D(), kptsTo3D = to.sensorData().keypoints3D();
+  auto descriptorsFrom = from.sensorData().descriptors(), descriptorsTo = to.sensorData().descriptors();
+  std::list<int> fromWordIds;
+  std::list<int> toWordIds;
+  std::vector<int> fromWordIdsV(descriptorsFrom.rows);
+  std::vector<int> toWordIdsV(descriptorsTo.rows, 0);
+  for (int i = 0; i < descriptorsFrom.rows; ++i)
+  {
+    int id = i+1;
+    fromWordIds.push_back(id);
+    fromWordIdsV[i] = id;
+  }
+
+  auto fromModel = from.sensorData().stereoCameraModels().size() > 0? from.sensorData().stereoCameraModels()[0].left() : from.sensorData().cameraModels()[0];
+  auto toModel = to.sensorData().stereoCameraModels().size() > 0? to.sensorData().stereoCameraModels()[0].left() : to.sensorData().cameraModels()[0];
+
+  std::vector<cv::Point2f> kptsFrom = NormKeypoints(origFrom, fromModel.imageHeight(), fromModel.imageWidth());
+  std::vector<cv::Point2f> kptsTo = NormKeypoints(origTo, toModel.imageHeight(), toModel.imageWidth());
+  
+  auto matches = lightglueMatcher->MatcherIdx(lightglueConfig, kptsTo, kptsFrom, (float *) descriptorsTo.data, (float *) descriptorsFrom.data);
+    for(size_t i=0; i<matches.size(); ++i)
+    {
+        toWordIdsV[matches[i].queryIdx] = fromWordIdsV[matches[i].trainIdx];
+    }
+    for(size_t i=0; i<toWordIdsV.size(); ++i)
+    {
+        int toId = toWordIdsV[i];
+        if(toId==0)
+        {
+            toId = fromWordIds.back()+i+1;
+        }
+        toWordIds.push_back(toId);
+    }
+    std::multiset<int> fromWordIdsSet(fromWordIds.begin(), fromWordIds.end());
+    std::multiset<int> toWordIdsSet(toWordIds.begin(), toWordIds.end());
+
+    std::multimap<int, int> wordsFrom;
+    std::multimap<int, int> wordsTo;
+    std::vector<cv::KeyPoint> wordsKptsFrom;
+    std::vector<cv::KeyPoint> wordsKptsTo;
+    std::vector<cv::Point3f> words3From;
+    std::vector<cv::Point3f> words3To;
+
+    int i=0;
+    UASSERT(kptsFrom3D.empty() || fromWordIds.size() == kptsFrom3D.size());
+    UASSERT(int(fromWordIds.size()) == descriptorsFrom.rows);
+    for(std::list<int>::iterator iter=fromWordIds.begin(); iter!=fromWordIds.end(); ++iter)
+    {
+        if(fromWordIdsSet.count(*iter) == 1)
+        {
+          wordsFrom.insert(wordsFrom.end(), std::make_pair(*iter, wordsFrom.size()));
+          if (!origFrom.empty())
+          {
+              wordsKptsFrom.push_back(origFrom[i]);
+          }
+          if(!kptsFrom3D.empty())
+          {
+              words3From.push_back(kptsFrom3D[i]);
+          }
+        }
+        ++i;
+    }
+    UASSERT(kptsTo3D.size() == 0 || kptsTo3D.size() == kptsTo.size());
+    UASSERT(toWordIds.size() == kptsTo.size());
+    UASSERT(int(toWordIds.size()) == descriptorsTo.rows);
+
+    i=0;
+    for(std::list<int>::iterator iter=toWordIds.begin(); iter!=toWordIds.end(); ++iter)
+    {
+      if(toWordIdsSet.count(*iter) == 1)
+      {
+          wordsTo.insert(wordsTo.end(), std::make_pair(*iter, wordsTo.size()));
+          wordsKptsTo.push_back(origTo[i]);
+          if(!kptsTo3D.empty())
+          {
+              words3To.push_back(kptsTo3D[i]);
+          }
+      }
+      ++i;
+    }
+    from.setWords(wordsFrom, wordsKptsFrom, words3From, cv::Mat());
+    to.setWords(wordsTo, wordsKptsTo, words3To, cv::Mat());
 }
 
 bool RGBDHandler::generate_new_keyframe(std::shared_ptr<rtabmap::SensorData> &keyframe)
@@ -344,8 +456,10 @@ bool RGBDHandler::generate_new_keyframe(std::shared_ptr<rtabmap::SensorData> &ke
       try
       {
         rtabmap::RegistrationInfo reg_info;
+        auto from = Signature(*keyframe), to = Signature(*previous_keyframe_);
+        setMatches(from, to);
         rtabmap::Transform t = registration_.computeTransformation(
-            *keyframe, *previous_keyframe_, rtabmap::Transform(), &reg_info);
+            from, to, rtabmap::Transform(), &reg_info);
         if (!t.isNull())
         {
           if (float(reg_info.inliers) >
@@ -422,10 +536,9 @@ void RGBDHandler::process_new_sensor_data()
 
 void RGBDHandler::sensor_data_to_rgbd_msg(
     const std::shared_ptr<rtabmap::SensorData> sensor_data,
-    rtabmap_msgs::msg::RGBDImage &msg_data, bool baselinkFrame)
+    rtabmap_msgs::msg::SensorData &msg_data, bool baselinkFrame)
 {
-  rtabmap_msgs::msg::RGBDImage data;
-  rtabmap_conversions::rgbdImageToROS(*sensor_data, msg_data, "camera");
+  rtabmap_conversions::sensorDataToROS(*sensor_data, msg_data);
   if (baselinkFrame) {
     rtabmap_conversions::points3fToROS(sensor_data->keypoints3D(), msg_data.points);
   }
@@ -471,8 +584,10 @@ void RGBDHandler::receive_local_keyframe_match(
     auto keyframe1 = local_descriptors_map_.at(msg->keyframe1_id);
     keyframe1->uncompressData();
     rtabmap::RegistrationInfo reg_info;
+    auto from = Signature(*keyframe0), to = Signature(*keyframe1);
+    setMatches(from, to);
     rtabmap::Transform t = registration_.computeTransformation(
-        *keyframe0, *keyframe1, rtabmap::Transform(), &reg_info);
+        from, to, rtabmap::Transform(), &reg_info);
 
     auto lc = std::make_unique<cslam_common_interfaces::msg::IntraRobotLoopClosure>();
     lc->keyframe0_id = msg->keyframe0_id;
@@ -504,20 +619,21 @@ void RGBDHandler::local_descriptors_msg_to_sensor_data(
         msg,
     rtabmap::SensorData &sensor_data)
 {
-  // Fill descriptors
-  rtabmap::CameraModel camera_model =
-      rtabmap_conversions::cameraModelFromROS(msg->data.rgb_camera_info,
-                                      rtabmap::Transform::getIdentity());
-  sensor_data = rtabmap::SensorData(
-      cv::Mat(), cv::Mat(), camera_model, 0,
-      rtabmap_conversions::timestampFromROS(msg->data.header.stamp));
+  // // Fill descriptors
+  // rtabmap::CameraModel camera_model =
+  //     rtabmap_conversions::cameraModelFromROS(msg->data.rgb_camera_info,
+  //                                     rtabmap::Transform::getIdentity());
+  // sensor_data = rtabmap::SensorData(
+  //     cv::Mat(), cv::Mat(), camera_model, 0,
+  //     rtabmap_conversions::timestampFromROS(msg->data.header.stamp));
 
-  std::vector<cv::KeyPoint> kpts;
-  rtabmap_conversions::keypointsFromROS(msg->data.key_points, kpts);
-  std::vector<cv::Point3f> kpts3D;
-  rtabmap_conversions::points3fFromROS(msg->data.points, kpts3D);
-  auto descriptors = rtabmap::uncompressData(msg->data.descriptors);
-  sensor_data.setFeatures(kpts, kpts3D, descriptors);
+  // std::vector<cv::KeyPoint> kpts;
+  // rtabmap_conversions::keypointsFromROS(msg->data.key_points, kpts);
+  // std::vector<cv::Point3f> kpts3D;
+  // rtabmap_conversions::points3fFromROS(msg->data.points, kpts3D);
+  // auto descriptors = rtabmap::uncompressData(msg->data.descriptors);
+  // sensor_data.setFeatures(kpts, kpts3D, descriptors);
+  sensor_data = rtabmap_conversions::sensorDataFromROS(msg->data);
 }
 
 void RGBDHandler::receive_local_image_descriptors(
@@ -546,8 +662,10 @@ void RGBDHandler::receive_local_image_descriptors(
       rtabmap::RegistrationInfo reg_info;
       auto tmp_from = local_descriptors_map_.at(local_keyframe_id);
       tmp_from->uncompressData();
+      auto from = Signature(*tmp_from), to = Signature(tmp_to);
+      setMatches(from, to);
       rtabmap::Transform t = registration_.computeTransformation(
-          *tmp_from, tmp_to, rtabmap::Transform(), &reg_info);
+        from, to, rtabmap::Transform(), &reg_info);
 
       // Store using pairs (robot_id, keyframe_id)
       auto lc = std::make_unique<cslam_common_interfaces::msg::InterRobotLoopClosure>();
@@ -637,6 +755,7 @@ void RGBDHandler::send_visualization_keypoints(const std::pair<std::shared_ptr<r
   features_msg->keyframe_id = keypoints_data.first->id();
   features_msg->robot_id = robot_id_;
   features_msg->data.key_points.clear();
+  features_msg->data.descriptors.clear();
 
   // Publish local descriptors
   visualization_local_descriptors_publisher_->publish(std::move(features_msg));
