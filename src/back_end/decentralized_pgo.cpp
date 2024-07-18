@@ -813,6 +813,7 @@ void DecentralizedPGO::broadcast_tf_callback()
   if (origin_to_first_pose_.header.frame_id !=
       origin_to_first_pose_.child_frame_id)
   {
+    origin_to_first_pose_.transform = gtsam_pose_to_transform_msg(local_pose_at_latest_optimization_.inverse() * latest_optimized_pose_);
     tf_broadcaster_->sendTransform(origin_to_first_pose_);
   }
 

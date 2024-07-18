@@ -63,7 +63,7 @@ class TestSparseMatching(unittest.TestCase):
         for i in range(nb_descriptors_to_test):
             query = np.random.rand(100)
             query = query / np.linalg.norm(query)
-            ds = np.linalg.norm(query[np.newaxis, :] - nnsm.data[:nnsm.n], axis=1)
+            ds = np.linalg.norm(query[np.newaxis, :] - nnsm.data.cpu().numpy()[:nnsm.n], axis=1)
             ns_dist = np.argsort(ds)[:k]
             ns_sim, sims = nnsm.search(query, k)
             # Check if sorted by similarity

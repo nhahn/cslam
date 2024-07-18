@@ -41,7 +41,7 @@ class LoopClosureSparseMatching(object):
             id (int): keyframe id
         """
         matches = []
-        tensor = torch.from_numpy(embedding.astype(np.float32)).cuda()
+        tensor = torch.from_numpy(embedding.astype(np.float32))
         self.local_nnsm.add_item(tensor, keyframe_id)
         for i in range(self.params['max_nb_robots']):
             if i != self.params['robot_id']:
@@ -60,7 +60,7 @@ class LoopClosureSparseMatching(object):
         Args:
             msg (cslam_common_interfaces.msg.GlobalDescriptor): global descriptor info
         """
-        tensor = torch.from_numpy(np.asarray(msg.descriptor).astype(np.float32)).cuda()
+        tensor = torch.from_numpy(np.asarray(msg.descriptor).astype(np.float32))
         self.other_robots_nnsm[msg.robot_id].add_item(
             tensor, msg.keyframe_id)
 
@@ -74,14 +74,14 @@ class LoopClosureSparseMatching(object):
         return match
 
     def match_local_loop_closures(self, descriptor, kf_id):
-        tensor = torch.from_numpy(np.asarray(descriptor).astype(np.float32)).cuda()
+        tensor = torch.from_numpy(np.asarray(descriptor).astype(np.float32))
         kfs, similarities = self.local_nnsm.search(tensor,
                                          k=self.params['frontend.nb_best_matches'])
         
         if len(kfs) > 0 and kfs[0] == kf_id:
             kfs, similarities = kfs[1:], similarities[1:]
         if len(kfs) == 0:
-            return None, None
+            return None, similarities
 
         for kf, similarity in zip(kfs, similarities):
             if abs(kf -
@@ -91,8 +91,8 @@ class LoopClosureSparseMatching(object):
             if similarity < self.params['frontend.similarity_threshold']:
                 continue
 
-            return kf, similarity
-        return None, None
+            return kf, similarities
+        return None, similarities
 
     def select_candidates(self,
                           number_of_candidates,

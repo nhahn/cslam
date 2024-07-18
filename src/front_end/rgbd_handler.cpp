@@ -40,6 +40,7 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
                        enable_visualization_);
   node_->get_parameter("visualization.publishing_period_ms",
                        visualization_period_ms_);
+  node_->declare_parameter("frontend.matcher_threshold", 0.1f);
   node_->get_parameter("visualization.voxel_size",
                        visualization_voxel_size_);
   node_->get_parameter("visualization.max_range",
@@ -75,7 +76,7 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
   lightglueConfig.grayScale = true;
   lightglueMatcher = std::make_shared<lightglue::LightGlueDecoupleOnnxRunner>();
   lightglueMatcher->InitOrtEnv(lightglueConfig);
-  lightglueMatcher->SetMatchThresh(lightglueConfig.threshold);
+  lightglueMatcher->SetMatchThresh(node_->get_parameter("frontend.matcher_threshold").as_double());
 
   if (keyframe_generation_ratio_threshold_ > 0.99)
   {

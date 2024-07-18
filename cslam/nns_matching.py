@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import torch
+import numpy as np
 
 class NearestNeighborsMatching(object):
     """Nearest Neighbor matching of description vectors
@@ -26,6 +27,9 @@ class NearestNeighborsMatching(object):
             vector (np.array): descriptor
             item: identification info (e.g., int)
         """
+        if not torch.is_tensor(vector):
+            vector = torch.from_numpy(vector.astype(np.float32))
+            
         if self.n >= len(self.data):
             if self.dim is None:
                 self.dim = len(vector)
@@ -51,6 +55,8 @@ class NearestNeighborsMatching(object):
             return [], []
 
         view = self.data[:self.n,:]
+        if not torch.is_tensor(query):
+            query = torch.from_numpy(query.astype(np.float32))
         qTensor = query.reshape(1, self.dim).to(self.device)
         similarity = torch.nn.functional.cosine_similarity(view, qTensor)
         ns = torch.argsort(similarity, descending=True)[:k]
