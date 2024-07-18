@@ -1,4 +1,5 @@
 #include "cslam/back_end/decentralized_pgo.h"
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 #define MAP_FRAME_ID(id) "robot" + std::to_string(id) + "_map"
 #define CURRENT_FRAME_ID(id) "robot" + std::to_string(id) + "_current_pose"
@@ -15,6 +16,8 @@ DecentralizedPGO::DecentralizedPGO(rclcpp::Node * node)
                        pose_graph_optimization_start_period_ms_);
   node_->get_parameter("backend.pose_graph_optimization_loop_period_ms",
                        pose_graph_optimization_loop_period_ms_);
+  node_->get_parameter("backend.odom_tf_reference_frame",
+                       odom_tf_reference_frame_);
   node_->get_parameter("backend.enable_broadcast_tf_frames",
                        enable_broadcast_tf_frames_);
   node_->get_parameter("neighbor_management.heartbeat_period_sec", heartbeat_period_sec_);
@@ -32,6 +35,7 @@ DecentralizedPGO::DecentralizedPGO(rclcpp::Node * node)
                        enable_visualization_);
   node_->get_parameter("visualization.publishing_period_ms",
                        visualization_period_ms_);
+  node_->get_parameter("frontend.sensor_base_frame_id", base_frame_id_);
 
   int max_waiting_param;
   node_->get_parameter("backend.max_waiting_time_sec", max_waiting_param);
@@ -72,6 +76,8 @@ DecentralizedPGO::DecentralizedPGO(rclcpp::Node * node)
   pose_graph_ = std::make_shared<gtsam::NonlinearFactorGraph>();
   current_pose_estimates_ = std::make_shared<gtsam::Values>();
   odometry_pose_estimates_ = std::make_shared<gtsam::Values>();
+  tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
   // Optimization timers
   optimization_timer_ = node_->create_wall_timer(
@@ -178,6 +184,7 @@ DecentralizedPGO::DecentralizedPGO(rclcpp::Node * node)
 
   // Initialize the transform broadcaster
   tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*node_);
+  static_tf_broadcaster_ = std::make_unique<tf2_ros::StaticTransformBroadcaster>(*node_);
 
   if (enable_broadcast_tf_frames_)
   {
@@ -236,6 +243,34 @@ bool DecentralizedPGO::check_received_pose_graphs()
 void DecentralizedPGO::odometry_callback(
     const cslam_common_interfaces::msg::KeyframeOdom::UniquePtr msg)
 {
+
+  if(base_frame_id_.length() > 0 && enable_broadcast_tf_frames_) {
+    if(!hasTransform_) {
+        geometry_msgs::msg::TransformStamped t;
+
+        // Look up for the transformation between target_frame and turtle2 frames
+        // and send velocity commands for turtle2 to reach target_frame
+        try {
+          t = tf_buffer_->lookupTransform(
+            msg->odom.child_frame_id, base_frame_id_, 
+           msg->odom.header.stamp);
+          base_transform_ = t;
+          base_transform_inv_ = transform_msg_to_pose3(base_transform_.transform);          
+          t.header.frame_id = MAP_FRAME_ID(robot_id_);
+          t.child_frame_id = msg->odom.header.frame_id;
+          t.header.stamp = node_->get_clock()->now();
+          static_tf_broadcaster_->sendTransform(t);
+
+          hasTransform_ = true;
+        } catch (const tf2::TransformException & ex) {
+          RCLCPP_INFO(
+            node_->get_logger(), "Could not transform %s to %s: %s",
+            base_frame_id_.c_str(), msg->odom.child_frame_id.c_str(), ex.what());
+        }
+
+    }
+  }
+
   gtsam::Pose3 current_estimate = odometry_msg_to_pose3(msg->odom);
   gtsam::LabeledSymbol symbol(GRAPH_LABEL, ROBOT_LABEL(robot_id_), msg->id);
 
@@ -284,9 +319,17 @@ void DecentralizedPGO::intra_robot_loop_closure_callback(
     gtsam::BetweenFactor<gtsam::Pose3> factor =
         gtsam::BetweenFactor<gtsam::Pose3>(symbol_from, symbol_to, measurement,
                                            default_noise_model_);
-
     pose_graph_->push_back(factor);
-    RCLCPP_INFO(node_->get_logger(), "New intra-robot loop closure (%d, %d).", msg->keyframe0_id, msg->keyframe1_id);
+    // auto fromPose = odometry_pose_estimates_->at<gtsam::Pose3>(symbol_from);
+    // auto toPose =  odometry_pose_estimates_->at<gtsam::Pose3>(symbol_to);
+
+    // auto diff = fromPose.inverse() * toPose;
+
+    RCLCPP_INFO(node_->get_logger(), "New intra-robot loop closure (%d, %d). - (%f, %f, %f)", 
+            msg->keyframe0_id, msg->keyframe1_id, measurement.x(), measurement.y(), measurement.z());
+    // RCLCPP_INFO(node_->get_logger(), "New intra-robot loop closure (%d, %d). - (%f, %f, %f) Odom diff: (%f, %f, %f) (%f, %f, %f)", 
+    //         msg->keyframe0_id, msg->keyframe1_id, measurement.x(), measurement.y(), measurement.z(),
+    //         diff.x(), diff.y(), diff.z(), diff.rotation().yaw(), diff.rotation().pitch(), diff.rotation().roll());
   }
 }
 
@@ -733,13 +776,13 @@ void DecentralizedPGO::visualization_callback()
 
 void DecentralizedPGO::update_transform_to_origin(const gtsam::Pose3 &pose)
 {
+  gtsam::LabeledSymbol first_symbol(GRAPH_LABEL, ROBOT_LABEL(robot_id_), 0);
   rclcpp::Time now = node_->get_clock()->now();
   origin_to_first_pose_.header.stamp = now;
   origin_to_first_pose_.header.frame_id = MAP_FRAME_ID(origin_robot_id_);
   origin_to_first_pose_.child_frame_id = MAP_FRAME_ID(robot_id_);
-
   origin_to_first_pose_.transform = gtsam_pose_to_transform_msg(pose);
-
+  //tf2::doTransform(gtsam_pose_to_transform_msg(pose), origin_to_first_pose_.transform, base_transform_);
   // Update the reference frame
   // This is the key info for many tasks since it allows conversions from
   // one robot reference frame to another.
@@ -749,7 +792,10 @@ void DecentralizedPGO::update_transform_to_origin(const gtsam::Pose3 &pose)
     msg.robot_id = robot_id_;
     msg.origin_to_local = origin_to_first_pose_;
     reference_frame_per_robot_publisher_->publish(msg);
+    //Attach the original transform for offsetting the odom link
+    //msg.transforms.emplace_back(gtsam_pose_to_transform_msg(origin_to_odom));
   }
+
   // Store for TF
   local_pose_at_latest_optimization_ = tentative_local_pose_at_latest_optimization_;
   latest_optimized_pose_ = current_pose_estimates_->at<gtsam::Pose3>(current_pose_estimates_->keys().back());
@@ -770,7 +816,6 @@ void DecentralizedPGO::broadcast_tf_callback()
     tf_broadcaster_->sendTransform(origin_to_first_pose_);
   }
 
-  // origin to latest optimized pose
   geometry_msgs::msg::TransformStamped latest_optimized_pose_msg;
   latest_optimized_pose_msg.header.stamp = now;
   latest_optimized_pose_msg.header.frame_id = MAP_FRAME_ID(origin_robot_id_);

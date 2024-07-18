@@ -49,6 +49,8 @@ namespace cslam
         virtual void send_visualization(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data);
 
     private:
+        std::shared_ptr<rtabmap::StereoCameraModel> stereoCameraModel {nullptr};
+
         image_transport::SubscriberFilter sub_image_rect_left_;
         image_transport::SubscriberFilter sub_image_rect_right_;
         image_transport::SubscriberFilter sub_image_global_;

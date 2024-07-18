@@ -15,18 +15,18 @@ class GeM(nn.Module):
         self.p = Parameter(torch.ones(1)*p)
         self.eps = eps
         
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         return F.avg_pool2d(x.clamp(min=self.eps).pow(self.p), (x.size(-2), x.size(-1))).pow(1./self.p)
     
-    def __repr__(self):
-        return self.__class__.__name__ + '(' + 'p=' + '{:.4f}'.format(self.p.data.tolist()[0]) + ', ' + 'eps=' + str(self.eps) + ')'
+    # def __repr__(self):
+    #     return self.__class__.__name__ + '(' + 'p=' + '{:.4f}'.format(self.p.data.tolist()[0]) + ', ' + 'eps=' + str(self.eps) + ')'
 
 
 class Flatten(torch.nn.Module):
     def __init__(self):
         super().__init__()
     def forward(self, x):
-        assert x.shape[2] == x.shape[3] == 1, f"{x.shape[2]} != {x.shape[3]} != 1"
+        # assert x.shape[2] == x.shape[3] == 1, f"{x.shape[2]} != {x.shape[3]} != 1"
         return x[:,:,0,0]
 
 

@@ -29,15 +29,15 @@ class NearestNeighborsMatching(object):
         if self.n >= len(self.data):
             if self.dim is None:
                 self.dim = len(vector)
-                self.data = torch.zeros((1000, self.dim), dtype=torch.float32, device=torch.device('cuda'))
+                self.data = torch.zeros((1000, self.dim), dtype=torch.float32, device=self.device)
             else:
-                self.data = torch.concat((self.data, torch.zeros(self.data.shape[0], self.data.shape[1]), 0))
+                self.data = torch.concat((self.data, torch.zeros((self.data.shape[0], self.data.shape[1]), device=self.device)))
 
         self.items[self.n] = item
         self.data[self.n] = vector.reshape(1,self.dim).to(self.device)
         self.n += 1
 
-    def search(self, query: torch.Tensor, k):  # searching from 100000 items consume 30ms
+    def search(self, query: torch.Tensor, k: int):  # searching from 100000 items consume 30ms
         """Search for nearest neighbors
 
         Args:

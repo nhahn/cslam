@@ -1,5 +1,6 @@
 #include "cslam/front_end/stereo_handler.h"
 #include <rtabmap_conversions/MsgConversion.h>
+#include "tf2_eigen/tf2_eigen.hpp"
 
 using namespace rtabmap;
 using namespace cslam;
@@ -121,20 +122,6 @@ void StereoHandler::stereo_with_additional_callback(
           ? image_rect_left->header.stamp
           : image_rect_right->header.stamp;
 
-  Transform localTransform(0,0,0,0,0,0);
-  if (base_frame_id_ != "")
-  {
-		localTransform = rtabmap_conversions::getTransform(
-		    base_frame_id_, image_rect_left->header.frame_id, stamp, *tf_buffer_, 0.1);
-
-		if (localTransform.isNull()) {
-		  RCLCPP_INFO(node_->get_logger(),
-		               "Could not get transform from %s to %s after 0.1 s!",
-		               base_frame_id_.c_str(), image_rect_left->header.frame_id.c_str());
-		  return;
-		}
-	}
-
   if (image_rect_left->data.size() && image_rect_right->data.size()) {
     bool alreadyRectified = true;
     rtabmap::Transform stereoTransform;
@@ -166,8 +153,7 @@ void StereoHandler::stereo_with_additional_callback(
 
     rtabmap::StereoCameraModel stereoModel =
         rtabmap_conversions::stereoCameraModelFromROS(*camera_info_left, *camera_info_right,
-                                              localTransform, stereoTransform);
-
+                                              rtabmap::Transform::getIdentity(), stereoTransform);
     if (stereoModel.baseline() == 0 && alreadyRectified) {
       stereoTransform = rtabmap_conversions::getTransform(
           camera_info_left->header.frame_id, camera_info_right->header.frame_id,
@@ -243,6 +229,9 @@ void StereoHandler::stereo_with_additional_callback(
     
     auto ptrGlobal = cv_bridge::toCvCopy(global_image);
 
+    RCLCPP_INFO(node_->get_logger(), "Stereo transform for cameras: %s", stereoModel.stereoTransform().prettyPrint().c_str());
+    RCLCPP_INFO(node_->get_logger(), "TF for cameras: %s", stereoModel.localTransform().prettyPrint().c_str());
+
     auto data = std::make_shared<rtabmap::SensorData>(
         ptrImageLeft->image, ptrImageRight->image, stereoModel,
         0, rtabmap_conversions::timestampFromROS(stamp), ptrGlobal->image);
@@ -268,7 +257,7 @@ void StereoHandler::stereo_with_additional_callback(
     RCLCPP_WARN(node_->get_logger(), "Odom: input images empty?!");
   }        
 
-    }
+}
 
 void StereoHandler::stereo_callback(
     const sensor_msgs::msg::Image::ConstSharedPtr image_rect_left,
@@ -285,7 +274,7 @@ void StereoHandler::stereo_callback(
   // Fix timestamps for logging
   auto odom = std::make_shared<nav_msgs::msg::Odometry>(*odom_ptr);
   odom->header.stamp = image_rect_left->header.stamp;
-  
+
   if (!(image_rect_left->encoding.compare(
             sensor_msgs::image_encodings::TYPE_8UC1) == 0 ||
         image_rect_left->encoding.compare(sensor_msgs::image_encodings::MONO8) ==
@@ -328,110 +317,100 @@ void StereoHandler::stereo_callback(
           ? image_rect_left->header.stamp
           : image_rect_right->header.stamp;
 
-  Transform localTransform(0,0,0,0,0,0);
-  //Transform localTransform = rtabmap::CameraModel::opticalRotation();
-  if (base_frame_id_ != "")
-  {
-		localTransform = rtabmap_conversions::getTransform(
-		    base_frame_id_, image_rect_left->header.frame_id, stamp, *tf_buffer_, 0.1);
-
-		if (localTransform.isNull()) {
-		  RCLCPP_INFO(node_->get_logger(),
-		               "Could not get transform from %s to %s after 0.1 s!",
-		               base_frame_id_.c_str(), image_rect_left->header.frame_id.c_str());
-		  return;
-		}
-	}
-
   if (image_rect_left->data.size() && image_rect_right->data.size()) {
     bool alreadyRectified = true;
-    rtabmap::Transform stereoTransform;
-    if (!alreadyRectified) {
-      stereoTransform = rtabmap_conversions::getTransform(
-          camera_info_right->header.frame_id, camera_info_left->header.frame_id,
-          camera_info_left->header.stamp, *tf_buffer_, 0.1);
-      if (stereoTransform.isNull()) {
-        RCLCPP_ERROR(node_->get_logger(),
-                     "Parameter %s is false but we cannot get TF between the "
-                     "two cameras! (between frames %s and %s)",
-                     Parameters::kRtabmapImagesAlreadyRectified().c_str(),
-                     camera_info_right->header.frame_id.c_str(),
-                     camera_info_left->header.frame_id.c_str());
-        return;
-      } else if (stereoTransform.isIdentity()) {
-        RCLCPP_ERROR(node_->get_logger(),
-                     "Parameter %s is false but we cannot get a valid TF "
-                     "between the two cameras! "
-                     "Identity transform returned between left and right "
-                     "cameras. Verify that if TF between "
-                     "the cameras is valid: \"rosrun tf tf_echo %s %s\".",
-                     Parameters::kRtabmapImagesAlreadyRectified().c_str(),
-                     camera_info_right->header.frame_id.c_str(),
-                     camera_info_left->header.frame_id.c_str());
+
+    if (!stereoCameraModel) {
+
+      rtabmap::Transform stereoTransform;
+      if (!alreadyRectified) {
+        stereoTransform = rtabmap_conversions::getTransform(
+            camera_info_right->header.frame_id, camera_info_left->header.frame_id,
+            camera_info_left->header.stamp, *tf_buffer_, 0.1);
+        if (stereoTransform.isNull()) {
+          RCLCPP_ERROR(node_->get_logger(),
+                      "Parameter %s is false but we cannot get TF between the "
+                      "two cameras! (between frames %s and %s)",
+                      Parameters::kRtabmapImagesAlreadyRectified().c_str(),
+                      camera_info_right->header.frame_id.c_str(),
+                      camera_info_left->header.frame_id.c_str());
+          return;
+        } else if (stereoTransform.isIdentity()) {
+          RCLCPP_ERROR(node_->get_logger(),
+                      "Parameter %s is false but we cannot get a valid TF "
+                      "between the two cameras! "
+                      "Identity transform returned between left and right "
+                      "cameras. Verify that if TF between "
+                      "the cameras is valid: \"rosrun tf tf_echo %s %s\".",
+                      Parameters::kRtabmapImagesAlreadyRectified().c_str(),
+                      camera_info_right->header.frame_id.c_str(),
+                      camera_info_left->header.frame_id.c_str());
+          return;
+        }
+      }
+      stereoCameraModel = std::make_shared<rtabmap::StereoCameraModel>(rtabmap_conversions::stereoCameraModelFromROS(*camera_info_left, *camera_info_right,
+                                                Transform::getIdentity(), stereoTransform));
+      if (stereoCameraModel->baseline() == 0 && alreadyRectified) {
+        stereoTransform = rtabmap_conversions::getTransform(
+            camera_info_left->header.frame_id, camera_info_right->header.frame_id,
+            camera_info_left->header.stamp, *tf_buffer_, 0.1);
+
+        if (!stereoTransform.isNull() && stereoTransform.x() > 0) {
+          static bool warned = false;
+          if (!warned) {
+            RCLCPP_WARN(
+                node_->get_logger(),
+                "Right camera info doesn't have Tx set but we are assuming that "
+                "stereo images are already rectified (see %s parameter). While "
+                "not "
+                "recommended, we used TF to get the baseline (%s->%s = %fm) for "
+                "convenience (e.g., D400 ir stereo issue). It is preferred to "
+                "feed "
+                "a valid right camera info if stereo images are already "
+                "rectified. This message is only printed once...",
+                rtabmap::Parameters::kRtabmapImagesAlreadyRectified().c_str(),
+                camera_info_right->header.frame_id.c_str(),
+                camera_info_left->header.frame_id.c_str(), stereoTransform.x());
+            warned = true;
+          }
+          stereoCameraModel = std::make_shared<rtabmap::StereoCameraModel>(
+              stereoCameraModel->left().fx(), stereoCameraModel->left().fy(),
+              stereoCameraModel->left().cx(), stereoCameraModel->left().cy(),
+              stereoTransform.x(), stereoCameraModel->localTransform(),
+              stereoCameraModel->left().imageSize());
+        }
+      }
+
+      if (alreadyRectified && stereoCameraModel->baseline() <= 0) {
+        RCLCPP_ERROR(
+            node_->get_logger(),
+            "The stereo baseline (%f) should be positive (baseline=-Tx/fx). We "
+            "assume a horizontal left/right stereo "
+            "setup where the Tx (or P(0,3)) is negative in the right camera info "
+            "msg.",
+            stereoCameraModel->baseline());
         return;
       }
-    }
 
-    rtabmap::StereoCameraModel stereoModel =
-        rtabmap_conversions::stereoCameraModelFromROS(*camera_info_left, *camera_info_right,
-                                              localTransform, stereoTransform);
-
-    if (stereoModel.baseline() == 0 && alreadyRectified) {
-      stereoTransform = rtabmap_conversions::getTransform(
-          camera_info_left->header.frame_id, camera_info_right->header.frame_id,
-          camera_info_left->header.stamp, *tf_buffer_, 0.1);
-
-      if (!stereoTransform.isNull() && stereoTransform.x() > 0) {
-        static bool warned = false;
-        if (!warned) {
+      if (stereoCameraModel->baseline() > 10.0) {
+        static bool shown = false;
+        if (!shown) {
           RCLCPP_WARN(
               node_->get_logger(),
-              "Right camera info doesn't have Tx set but we are assuming that "
-              "stereo images are already rectified (see %s parameter). While "
-              "not "
-              "recommended, we used TF to get the baseline (%s->%s = %fm) for "
-              "convenience (e.g., D400 ir stereo issue). It is preferred to "
-              "feed "
-              "a valid right camera info if stereo images are already "
-              "rectified. This message is only printed once...",
-              rtabmap::Parameters::kRtabmapImagesAlreadyRectified().c_str(),
-              camera_info_right->header.frame_id.c_str(),
-              camera_info_left->header.frame_id.c_str(), stereoTransform.x());
-          warned = true;
+              "Detected baseline (%f m) is quite large! Is your "
+              "right camera_info P(0,3) correctly set? Note that "
+              "baseline=-P(0,3)/P(0,0). This warning is printed only once.",
+              stereoCameraModel->baseline());
+          shown = true;
         }
-        stereoModel = rtabmap::StereoCameraModel(
-            stereoModel.left().fx(), stereoModel.left().fy(),
-            stereoModel.left().cx(), stereoModel.left().cy(),
-            stereoTransform.x(), stereoModel.localTransform(),
-            stereoModel.left().imageSize());
       }
+      RCLCPP_INFO(node_->get_logger(), "Stereo cam setup: %f -- %f %f %f %f %f", stereoCameraModel->baseline(), stereoCameraModel->left().fx(), stereoCameraModel->left().fy(),
+              stereoCameraModel->left().cx(), stereoCameraModel->left().cy(),
+              stereoTransform.x());
+      RCLCPP_INFO(node_->get_logger(), "TF for cameras: %s", stereoCameraModel->localTransform().prettyPrint().c_str());
     }
 
-    if (alreadyRectified && stereoModel.baseline() <= 0) {
-      RCLCPP_ERROR(
-          node_->get_logger(),
-          "The stereo baseline (%f) should be positive (baseline=-Tx/fx). We "
-          "assume a horizontal left/right stereo "
-          "setup where the Tx (or P(0,3)) is negative in the right camera info "
-          "msg.",
-          stereoModel.baseline());
-      return;
-    }
-
-    if (stereoModel.baseline() > 10.0) {
-      static bool shown = false;
-      if (!shown) {
-        RCLCPP_WARN(
-            node_->get_logger(),
-            "Detected baseline (%f m) is quite large! Is your "
-            "right camera_info P(0,3) correctly set? Note that "
-            "baseline=-P(0,3)/P(0,0). This warning is printed only once.",
-            stereoModel.baseline());
-        shown = true;
-      }
-    }
-
-    auto ptrImageLeft = cv_bridge::toCvCopy(
+    auto ptrImageLeft = cv_bridge::toCvShare(
         image_rect_left, image_rect_left->encoding.compare(
                            sensor_msgs::image_encodings::TYPE_8UC1) == 0 ||
                                image_rect_left->encoding.compare(
@@ -441,7 +420,7 @@ void StereoHandler::stereo_callback(
                              sensor_msgs::image_encodings::MONO16) != 0
                            ? "bgr8"
                            : "mono8");
-    auto ptrImageRight = cv_bridge::toCvCopy(
+    auto ptrImageRight = cv_bridge::toCvShare(
         image_rect_right, image_rect_right->encoding.compare(
                             sensor_msgs::image_encodings::TYPE_8UC1) == 0 ||
                                 image_rect_right->encoding.compare(
@@ -450,8 +429,9 @@ void StereoHandler::stereo_callback(
                             : "mono8");
 
     auto data = std::make_shared<rtabmap::SensorData>(
-        ptrImageLeft->image, ptrImageRight->image, stereoModel,
+        ptrImageLeft->image, ptrImageRight->image, *stereoCameraModel.get(),
         0, rtabmap_conversions::timestampFromROS(stamp));
+
 
     received_data_queue_.push_back(std::make_pair(data, odom));
     if (received_data_queue_.size() > max_queue_size_) {

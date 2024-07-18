@@ -50,7 +50,6 @@ find_package(image_geometry REQUIRED)
 # find_package(rtabmap_ros REQUIRED)
 find_package(rtabmap_msgs REQUIRED)
 find_package(rtabmap_conversions REQUIRED)
-find_package(Torch REQUIRED)
 find_package(lightglue_onnx REQUIRED)
 find_package(RTABMap REQUIRED)
 find_package(CUDAToolkit REQUIRED)
@@ -63,6 +62,10 @@ include(CheckCXXCompilerFlag)
 CHECK_CXX_COMPILER_FLAG("-std=c++17" COMPILER_SUPPORTS_CXX17)
 set(CMAKE_CXX_STANDARD 17)
 
+set(ONNXRuntime_ROOT_DIR "/opt/onnxruntime")
+set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}; -O3)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindONNXRuntime.cmake)
+
 
 ###########
 ## Build ##
@@ -73,13 +76,10 @@ set(CMAKE_CXX_STANDARD 17)
 # include_directories(include)
 include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/include
-  ${RTABMap_INCLUDE_DIRS}
   # ${rtabmap_ros_INCLUDE_DIRS}
   ${rtabmap_msgs_INCLUDE_DIRS}
   ${rtabmap_conversions_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
-  ${GTSAM_INCLUDE_DIR}
-  ${TORCH_INCLUDE_DIRS}
 )
 
 # libraries
@@ -113,20 +113,6 @@ SET(Libraries
 )
 
 find_package(cslam_common_interfaces REQUIRED)
-
-# add_executable(pose_graph_manager 
-#   src/back_end/decentralized_pgo.cpp
-#   src/back_end/pose_graph_manager_node.cpp
-#   src/back_end/utils/logger.cpp
-#   src/back_end/gtsam_utils.cpp
-#   src/back_end/utils/simulated_rendezvous.cpp)
-# target_link_libraries(pose_graph_manager gtsam)
-# ament_target_dependencies(pose_graph_manager 
-#   ${Libraries}
-#   cslam_common_interfaces)
-# set_target_properties(pose_graph_manager 
-#   PROPERTIES OUTPUT_NAME "pose_graph_manager")
-
 set(node_plugins "")
 
 set(pose_graph_manager_component ${comp}_component)
@@ -140,6 +126,9 @@ ament_target_dependencies(pose_graph_manager_component
   ${Libraries}
   cslam_common_interfaces)
 target_link_libraries(pose_graph_manager_component gtsam)
+target_include_directories(pose_graph_manager_component PUBLIC
+  ${GTSAM_INCLUDE_DIR}
+)
 rclcpp_components_register_node(pose_graph_manager_component PLUGIN "cslam::PoseGraphManagerComponent" EXECUTABLE pose_graph_manager)
 set(node_plugins "${node_plugins}cslam::PoseGraphManagerComponent;$<TARGET_FILE:pose_graph_manager_component>\n")
 
@@ -152,23 +141,45 @@ add_library(map_manager_component SHARED
   #src/front_end/sensor_msg_utils.cpp
   src/front_end/visualization_utils.cpp
 )
+target_include_directories(map_manager_component PUBLIC
+  ${RTABMap_INCLUDE_DIRS}
+  $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_INCLUDEDIR}>
+)
 ament_target_dependencies(map_manager_component 
   ${Libraries} RTABMap cslam_common_interfaces lightglue_onnx)
 rclcpp_components_register_node(map_manager_component PLUGIN "cslam::MapManagerComponent" EXECUTABLE map_manager)
 set(node_plugins "${node_plugins}cslam::MapManagerComponent;$<TARGET_FILE:map_manager_component>\n")
 
-set(global_descriptor_component ${comp}_component)
-add_library(global_descriptor_component SHARED
+cuda_add_library(global_descriptor_component SHARED
   src/back_end/global_descriptor_component.cpp
 )
-target_link_libraries(global_descriptor_component ${TORCH_LIBRARIES} "stdc++fs")
-target_link_options(global_descriptor_component PRIVATE ${TORCH_CXX_FLAGS})
-
+target_link_libraries(global_descriptor_component ${ONNXRuntime_LIBRARIES})
+target_compile_definitions(global_descriptor_component PUBLIC RT_CACHE_ROOT=$ENV{HOME})
+ament_export_dependencies(OpenCV CUDA)
 ament_target_dependencies(global_descriptor_component 
-  ${Libraries} Torch 
+  ${Libraries}  
   cslam_common_interfaces)
+target_include_directories(global_descriptor_component PUBLIC
+  ${OpenCV_INCLUDE_DIRS}
+  ${ONNXRuntime_INCLUDE_DIR}
+  ${CUDA_INCLUDE_DIRS}
+  $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_INCLUDEDIR}>
+)
+
 rclcpp_components_register_node(global_descriptor_component PLUGIN "cslam::GlobalDescriptorComponent" EXECUTABLE global_descriptor)
 set(node_plugins "${node_plugins}cslam::GlobalDescriptorComponent;$<TARGET_FILE:global_descriptor_component>\n")
+
+cuda_add_executable(cosplace_test tests/test_global.cpp)
+target_include_directories(cosplace_test PUBLIC
+  ${OpenCV_INCLUDE_DIRS}
+  ${ONNXRuntime_INCLUDE_DIR}
+  ${CUDA_INCLUDE_DIRS}
+  $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_INCLUDEDIR}>
+)
+target_compile_definitions(cosplace_test PUBLIC RT_CACHE_ROOT=$ENV{HOME})
+target_link_libraries(cosplace_test ${ONNXRuntime_LIBRARIES} ${OpenCV_LIBRARIES})
+set_property(TARGET cosplace_test PROPERTY CXX_STANDARD 17)
+install(TARGETS cosplace_test RUNTIME DESTINATION ${CMAKE_SOURCE_DIR}/tests)
 
 # Only required when using messages built from the same package
 # https://index.ros.org/doc/ros2/Tutorials/Rosidl-Tutorial/
@@ -185,6 +196,11 @@ install(DIRECTORY include/${PROJECT_NAME}/
 
 install(DIRECTORY 
    models
+   DESTINATION share/${PROJECT_NAME}/
+)
+
+install(DIRECTORY 
+   launch
    DESTINATION share/${PROJECT_NAME}/
 )
 

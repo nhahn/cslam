@@ -22,8 +22,10 @@ namespace cslam {
        declare_parameter<bool>("evaluation.enable_gps_recording", false);
        declare_parameter<bool>("evaluation.enable_simulated_rendezvous", false);
        declare_parameter<std::string>("evaluation.rendezvous_schedule_file", "");
+       declare_parameter<std::string>("backend.odom_tf_reference_frame", "");
        declare_parameter<bool>("evaluation.enable_pose_timestamps_recording", false);
        declare_parameter<bool>("visualization.enable", false);
+       declare_parameter<std::string>("frontend.sensor_base_frame_id", ""); // If empty we assume that the camera link is the base link
        declare_parameter<int>("visualization.publishing_period_ms", 0);
       manager = std::make_shared<DecentralizedPGO>(this);
       }

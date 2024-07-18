@@ -4,7 +4,6 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include <rtabmap_msgs/msg/rgbd_image.hpp>
-
 #include <rtabmap/core/Compression.h>
 #include <rtabmap/core/Memory.h>
 #include <rtabmap/core/RegistrationVis.h>
@@ -64,7 +63,7 @@ namespace cslam
          * @param node ROS 2 node handle
          */
         RGBDHandler(rclcpp::Node * node);
-        ~RGBDHandler(){};
+        ~RGBDHandler(){delete detector_;};
 
         /**
          * @brief Processes Latest received image
@@ -249,7 +248,8 @@ namespace cslam
             cslam_common_interfaces::msg::LocalImageDescriptors>::SharedPtr
             local_descriptors_subscriber_;
 
-        rtabmap::RegistrationVis registration_;
+        rtabmap::RegistrationVis inter_registration_;
+        rtabmap::RegistrationVis intra_registration_;
 
         rclcpp::Publisher<
             cslam_common_interfaces::msg::InterRobotLoopClosure>::SharedPtr
@@ -284,12 +284,13 @@ namespace cslam
         std::deque<sensor_msgs::msg::NavSatFix>
             received_gps_queue_;
         std::string global_image_topic_;
+        tf2::Transform base_transform_; bool hasTransform_;
+        rtabmap::Feature2D * detector_;
 
     private:
-        void setMatches(rtabmap::Signature &from, rtabmap::Signature &to);
+        bool setMatches(rtabmap::Signature &from, rtabmap::Signature &to);
         std::shared_ptr<lightglue::LightGlueDecoupleOnnxRunner> lightglueMatcher;
         lightglue::Configuration lightglueConfig;
-
         rtabmap::ParametersMap rtabmap_parameters;
         image_transport::SubscriberFilter sub_image_color_;
         message_filters::Subscriber<sensor_msgs::msg::CameraInfo> sub_camera_info_color_;
