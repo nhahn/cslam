@@ -299,9 +299,6 @@ namespace cslam
 
         bool enable_visualization_;
 
-        gtsam::SharedNoiseModel default_noise_model_;
-        float rotation_default_noise_std_, translation_default_noise_std_;
-
         std::string base_frame_id_;
         geometry_msgs::msg::TransformStamped base_transform_; bool hasTransform_;
         gtsam::Pose3 base_transform_inv_;

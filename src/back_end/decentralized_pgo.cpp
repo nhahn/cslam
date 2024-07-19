@@ -6,7 +6,16 @@
 #define LATEST_OPTIMIZED_FRAME_ID(id) "robot" + std::to_string(id) + "_latest_optimized_pose"
 
 using namespace cslam;
+using namespace gtsam;
 
+static const auto prior_noise = noiseModel::Diagonal::Sigmas(
+  (Vector(6) << Vector3::Constant(0.3), Vector3::Constant(0.1))
+      .finished());
+
+static const auto default_noise_model_ = noiseModel::Diagonal::Sigmas(
+  (Vector(6) << Vector3::Constant(0.1), Vector3::Constant(0.01))
+      .finished());
+      
 DecentralizedPGO::DecentralizedPGO(rclcpp::Node * node)
     : node_(node), max_waiting_time_sec_(60, 0)
 {
@@ -66,13 +75,7 @@ DecentralizedPGO::DecentralizedPGO(rclcpp::Node * node)
           std::bind(&DecentralizedPGO::write_current_estimates_callback, this,
                     std::placeholders::_1));
 
-  rotation_default_noise_std_ = 0.01;
-  translation_default_noise_std_ = 0.1;
-  Eigen::VectorXd sigmas(6);
-  sigmas << rotation_default_noise_std_, rotation_default_noise_std_,
-      rotation_default_noise_std_, translation_default_noise_std_,
-      translation_default_noise_std_, translation_default_noise_std_;
-  default_noise_model_ = gtsam::noiseModel::Diagonal::Sigmas(sigmas);
+
   pose_graph_ = std::make_shared<gtsam::NonlinearFactorGraph>();
   current_pose_estimates_ = std::make_shared<gtsam::Values>();
   odometry_pose_estimates_ = std::make_shared<gtsam::Values>();
@@ -272,6 +275,12 @@ void DecentralizedPGO::odometry_callback(
   }
 
   gtsam::Pose3 current_estimate = odometry_msg_to_pose3(msg->odom);
+  const auto v = msg->odom.pose.covariance;
+  gtsam::SharedNoiseModel noise = default_noise_model_;
+  if (std::any_of(v.begin(), v.end(), [](const double i) { return i != 0.0; }))  {
+    Eigen::MatrixXd covariance = Eigen::Map<Eigen::Matrix<double, 6, 6> >(msg->odom.pose.covariance.data());
+    noise = gtsam::noiseModel::Gaussian::Information(covariance);
+  }
   gtsam::LabeledSymbol symbol(GRAPH_LABEL, ROBOT_LABEL(robot_id_), msg->id);
 
   odometry_pose_estimates_->insert(symbol, current_estimate);
@@ -284,7 +293,7 @@ void DecentralizedPGO::odometry_callback(
   {
     gtsam::Pose3 odom_diff = latest_local_pose_.inverse() * current_estimate;
     gtsam::BetweenFactor<gtsam::Pose3> factor(latest_local_symbol_, symbol,
-                                              odom_diff, default_noise_model_);
+                                              odom_diff, noise);
     pose_graph_->push_back(factor);
   }
 
@@ -309,8 +318,9 @@ void DecentralizedPGO::intra_robot_loop_closure_callback(
 {
   if (msg->success)
   {
-    gtsam::Pose3 measurement = transform_msg_to_pose3(msg->transform);
-
+    gtsam::Pose3 measurement = pose_msg_to_gtsam(msg->pose.pose);
+    Eigen::MatrixXd covariance = Eigen::Map<Eigen::Matrix<double, 6, 6> >(msg->pose.covariance.data());
+    auto noise = gtsam::noiseModel::Gaussian::Information(covariance);
     gtsam::LabeledSymbol symbol_from(GRAPH_LABEL, ROBOT_LABEL(robot_id_),
                                      msg->keyframe0_id);
     gtsam::LabeledSymbol symbol_to(GRAPH_LABEL, ROBOT_LABEL(robot_id_),
@@ -318,7 +328,7 @@ void DecentralizedPGO::intra_robot_loop_closure_callback(
 
     gtsam::BetweenFactor<gtsam::Pose3> factor =
         gtsam::BetweenFactor<gtsam::Pose3>(symbol_from, symbol_to, measurement,
-                                           default_noise_model_);
+                                           noise);
     pose_graph_->push_back(factor);
     // auto fromPose = odometry_pose_estimates_->at<gtsam::Pose3>(symbol_from);
     // auto toPose =  odometry_pose_estimates_->at<gtsam::Pose3>(symbol_to);
@@ -339,7 +349,9 @@ void DecentralizedPGO::inter_robot_loop_closure_callback(
 {
   if (msg->success)
   {
-    gtsam::Pose3 measurement = transform_msg_to_pose3(msg->transform);
+    gtsam::Pose3 measurement = pose_msg_to_gtsam(msg->pose.pose);
+    Eigen::MatrixXd covariance = Eigen::Map<const Eigen::Matrix<double, 6, 6> >(msg->pose.covariance.data());
+    auto noise = gtsam::noiseModel::Gaussian::Information(covariance);
 
     unsigned char robot0_c = ROBOT_LABEL(msg->robot0_id);
     gtsam::LabeledSymbol symbol_from(GRAPH_LABEL, robot0_c,
@@ -349,7 +361,7 @@ void DecentralizedPGO::inter_robot_loop_closure_callback(
 
     gtsam::BetweenFactor<gtsam::Pose3> factor =
         gtsam::BetweenFactor<gtsam::Pose3>(symbol_from, symbol_to, measurement,
-                                           default_noise_model_);
+                                           noise);
 
     inter_robot_loop_closures_[{std::min(msg->robot0_id, msg->robot1_id),
                                 std::max(msg->robot0_id, msg->robot1_id)}]
@@ -689,12 +701,13 @@ void DecentralizedPGO::optimized_estimates_callback(
     origin_robot_id_ = msg->origin_robot_id;
     gtsam::LabeledSymbol first_symbol(GRAPH_LABEL, ROBOT_LABEL(robot_id_), 0);
 
-    gtsam::Pose3 first_pose;
+    gtsam::Pose3 first_pose_optimized;
     if (current_pose_estimates_->exists(first_symbol))
     {
-      first_pose = current_pose_estimates_->at<gtsam::Pose3>(first_symbol);
+      first_pose_optimized = current_pose_estimates_->at<gtsam::Pose3>(first_symbol);
     }
-    update_transform_to_origin(first_pose);
+    gtsam::Pose3 originOffset = odometry_pose_estimates_->at<gtsam::Pose3>(first_symbol).inverse() * first_pose_optimized;
+    update_transform_to_origin(originOffset);
 
     if (enable_logs_) {
       try{
@@ -813,7 +826,7 @@ void DecentralizedPGO::broadcast_tf_callback()
   if (origin_to_first_pose_.header.frame_id !=
       origin_to_first_pose_.child_frame_id)
   {
-    origin_to_first_pose_.transform = gtsam_pose_to_transform_msg(local_pose_at_latest_optimization_.inverse() * latest_optimized_pose_);
+    //origin_to_first_pose_.transform = gtsam_pose_to_transform_msg(local_pose_at_latest_optimization_.inverse() * latest_optimized_pose_);
     tf_broadcaster_->sendTransform(origin_to_first_pose_);
   }
 
@@ -893,7 +906,7 @@ void DecentralizedPGO::start_optimization()
 
   aggregate_pose_graph_.first->addPrior(
       first_symbol, current_pose_estimates_->at<gtsam::Pose3>(first_symbol),
-      default_noise_model_);
+      prior_noise);
 
   if (enable_logs_){
     logger_->log_initial_global_pose_graph(aggregate_pose_graph_.first, aggregate_pose_graph_.second);

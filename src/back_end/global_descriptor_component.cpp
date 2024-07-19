@@ -70,10 +70,10 @@ namespace cslam {
 		//session_options0.SetLogSeverityLevel(1);
 		session_options.SetInterOpNumThreads(std::thread::hardware_concurrency());
 		session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-
+		auto modelPath = get_parameter("frontend.cosplace.model").as_string();
 		std::cout << "[INFO] OrtSessionOptions Append CUDAExecutionProvider" << std::endl;
 		OrtCUDAProviderOptions cuda_options{};
-		auto path = std::filesystem::path(STRINGIZE_VALUE_OF(RT_CACHE_ROOT)) / ".tensorrt_cache";
+		auto path = std::filesystem::path(modelPath).parent_path() / "trt_engines";
 		std::filesystem::create_directory(path);
 
 		Ort::ThrowOnError(api.CreateTensorRTProviderOptions(&tensorrt_options));
@@ -124,7 +124,7 @@ namespace cslam {
 		session_options.AppendExecutionProvider_CUDA(cuda_options);
 		session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
 
-		Session = std::make_unique<Ort::Session>(env, get_parameter("frontend.cosplace.model").as_string().c_str(), session_options);
+		Session = std::make_unique<Ort::Session>(env, modelPath.c_str(), session_options);
 
 		// Initial Extractor
 		size_t numInputNodes = Session->GetInputCount();

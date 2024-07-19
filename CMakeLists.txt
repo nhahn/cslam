@@ -154,7 +154,6 @@ cuda_add_library(global_descriptor_component SHARED
   src/back_end/global_descriptor_component.cpp
 )
 target_link_libraries(global_descriptor_component ${ONNXRuntime_LIBRARIES})
-target_compile_definitions(global_descriptor_component PUBLIC RT_CACHE_ROOT=$ENV{HOME})
 ament_export_dependencies(OpenCV CUDA)
 ament_target_dependencies(global_descriptor_component 
   ${Libraries}  
@@ -176,7 +175,6 @@ target_include_directories(cosplace_test PUBLIC
   ${CUDA_INCLUDE_DIRS}
   $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_INCLUDEDIR}>
 )
-target_compile_definitions(cosplace_test PUBLIC RT_CACHE_ROOT=$ENV{HOME})
 target_link_libraries(cosplace_test ${ONNXRuntime_LIBRARIES} ${OpenCV_LIBRARIES})
 set_property(TARGET cosplace_test PROPERTY CXX_STANDARD 17)
 install(TARGETS cosplace_test RUNTIME DESTINATION ${CMAKE_SOURCE_DIR}/tests)

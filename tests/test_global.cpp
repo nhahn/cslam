@@ -82,7 +82,7 @@ namespace cslam {
 
 		std::cout << "[INFO] OrtSessionOptions Append CUDAExecutionProvider" << std::endl;
 		OrtCUDAProviderOptions cuda_options{};
-		auto path = std::filesystem::path(STRINGIZE_VALUE_OF(RT_CACHE_ROOT)) / ".tensorrt_cache";
+		auto path = std::filesystem::path(model).parent_path() / "trt_engines";
 		std::filesystem::create_directory(path);
 
 		Ort::ThrowOnError(api.CreateTensorRTProviderOptions(&tensorrt_options));

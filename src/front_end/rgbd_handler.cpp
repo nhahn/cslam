@@ -1,6 +1,5 @@
 #include "cslam/front_end/rgbd_handler.h"
 #include <rtabmap_conversions/MsgConversion.h>
-#include <rtabmap/core/PythonInterface.h>
 #include <filesystem>
 #include <tuple>
 // For visualization
@@ -16,7 +15,6 @@
 
 using namespace rtabmap;
 using namespace cslam;
-rtabmap::PythonInterface pythonInterface;
 
 #define MAP_FRAME_ID(id) "robot" + std::to_string(id) + "_map"
 
@@ -616,7 +614,8 @@ void RGBDHandler::receive_local_keyframe_match(
       lc->success = true;
       auto fluFrame = CameraModel::opticalRotation() * t * CameraModel::opticalRotation().inverse();
       //RCLCPP_INFO(node_->get_logger(), "Intra loop closure: %s", t.prettyPrint().c_str());
-      rtabmap_conversions::transformToGeometryMsg(fluFrame, lc->transform);
+      reg_info.covariance.reshape(1,1).copyTo(lc->pose.covariance);
+      rtabmap_conversions::transformToPoseMsg(fluFrame, lc->pose.pose);
     }
     else
     {
@@ -697,7 +696,8 @@ void RGBDHandler::receive_local_image_descriptors(
       {
         lc->success = true;
         auto fluFrame = CameraModel::opticalRotation() * t * CameraModel::opticalRotation().inverse();
-        rtabmap_conversions::transformToGeometryMsg(fluFrame, lc->transform);
+        reg_info.covariance.reshape(1,1).copyTo(lc->pose.covariance);
+        rtabmap_conversions::transformToPoseMsg(fluFrame, lc->pose.pose);
         inter_robot_loop_closure_publisher_->publish(std::move(lc));
       }
       else
