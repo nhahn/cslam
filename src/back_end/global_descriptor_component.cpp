@@ -68,6 +68,7 @@ namespace cslam {
 
 		session_options = Ort::SessionOptions();
 		//session_options0.SetLogSeverityLevel(1);
+		session_options.SetIntraOpNumThreads(std::thread::hardware_concurrency());
 		session_options.SetInterOpNumThreads(std::thread::hardware_concurrency());
 		session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 		auto modelPath = get_parameter("frontend.cosplace.model").as_string();
@@ -120,7 +121,7 @@ namespace cslam {
 		cuda_options.user_compute_stream = stream.cudaPtr();
 		cuda_options.default_memory_arena_cfg = nullptr;
 		
-		session_options.AppendExecutionProvider_TensorRT_V2(*tensorrt_options);
+		// session_options.AppendExecutionProvider_TensorRT_V2(*tensorrt_options);
 		session_options.AppendExecutionProvider_CUDA(cuda_options);
 		session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
 
