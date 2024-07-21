@@ -51,7 +51,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--backbone",
         type=str,
-        default="ResNet18",
+        default="ResNet50",
         choices=list(AVAILABLE_TRAINED_MODELS.keys()),
         required=False,
         help="Image net backbone to use",
@@ -59,10 +59,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dims",
         type=int,
-        default=64,
+        default=128,
         choices=AVAILABLE_TRAINED_MODELS["ResNet152"],
         required=False,
         help="Descriptor dimensionality",
+    )
+    parser.add_argument(
+        "--version",
+        type=str,
+        default="Eigenplaces",
+        choices=["Cosplace", "Eigenplaces"],
+        required=False,
+        help="Model version to use",
     )
 
     return parser.parse_args()
@@ -70,13 +78,14 @@ def parse_args() -> argparse.Namespace:
 def export_cosplace(
     backbone="ResNet18",
     dims=64,
+    version="Eigenplaces",
     output_path=None,
 ):
     
     if output_path is None:
-        output_path = f"weights/cosplace{backbone}_{dims}.onnx"
+        output_path = f"weights/{version}{backbone}_{dims}.onnx"
 
-    model = get_trained_model(backbone, dims).eval()
+    model = get_trained_model(backbone, dims, version).eval()
     module = NetEmbedding(model).eval()
     
     image, scale = load_image("DSC_0410.JPG")

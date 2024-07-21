@@ -43,7 +43,7 @@ StereoHandler::StereoHandler(rclcpp::Node * node)
           .reliability((rmw_qos_reliability_policy_t)2)
           .get_rmw_qos_profile());
 
-    stereo_plus_sync_policy_ = new message_filters::Synchronizer<StereoPlusSyncPolicy>(
+    stereo_plus_sync_policy_ = std::make_unique<message_filters::Synchronizer<StereoPlusSyncPolicy>>(
         StereoPlusSyncPolicy(max_queue_size_), sub_image_rect_left_, sub_image_rect_right_, sub_image_global_,
         sub_camera_info_left_, sub_camera_info_right_, sub_odometry_);
     stereo_plus_sync_policy_->registerCallback(
@@ -51,9 +51,10 @@ StereoHandler::StereoHandler(rclcpp::Node * node)
                     std::placeholders::_2, std::placeholders::_3,
                     std::placeholders::_4, std::placeholders::_5, std::placeholders::_6));
   } else {
-    stereo_sync_policy_ = new message_filters::Synchronizer<StereoSyncPolicy>(
+    stereo_sync_policy_ = std::make_unique<message_filters::Synchronizer<StereoSyncPolicy>>(
         StereoSyncPolicy(max_queue_size_), sub_image_rect_left_, sub_image_rect_right_,
         sub_camera_info_left_, sub_camera_info_right_, sub_odometry_);
+    // stereo_sync_policy_->getPolicy()->setMaxIntervalDuration(rclcpp::Duration(0,2000000));
     stereo_sync_policy_->registerCallback(
         std::bind(&StereoHandler::stereo_callback, this, std::placeholders::_1,
                     std::placeholders::_2, std::placeholders::_3,

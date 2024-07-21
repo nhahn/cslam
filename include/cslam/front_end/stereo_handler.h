@@ -61,14 +61,14 @@ namespace cslam
             sensor_msgs::msg::CameraInfo, sensor_msgs::msg::CameraInfo,
             nav_msgs::msg::Odometry>
             StereoSyncPolicy;
-        message_filters::Synchronizer<StereoSyncPolicy> *stereo_sync_policy_;
+        std::unique_ptr<message_filters::Synchronizer<StereoSyncPolicy>> stereo_sync_policy_;
 
         typedef message_filters::sync_policies::ApproximateTime<
             sensor_msgs::msg::Image, sensor_msgs::msg::Image, sensor_msgs::msg::Image,
             sensor_msgs::msg::CameraInfo, sensor_msgs::msg::CameraInfo,
             nav_msgs::msg::Odometry>
             StereoPlusSyncPolicy;
-        message_filters::Synchronizer<StereoPlusSyncPolicy> *stereo_plus_sync_policy_;
+         std::unique_ptr<message_filters::Synchronizer<StereoPlusSyncPolicy>> stereo_plus_sync_policy_;
     };
 } // namespace cslam
 #endif

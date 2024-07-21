@@ -72,6 +72,8 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
     node_->get_parameter("frontend.lightglue_model").as_string()
   };
   lightglueConfig.grayScale = true;
+  lightglueConfig.matcherUseTrt = false;
+  lightglueConfig.extractorUseTrt = false;
   lightglueMatcher = std::make_shared<lightglue::LightGlueDecoupleOnnxRunner>();
   lightglueMatcher->InitOrtEnv(lightglueConfig);
   lightglueMatcher->SetMatchThresh(node_->get_parameter("frontend.matcher_threshold").as_double());

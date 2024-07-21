@@ -88,7 +88,8 @@ def launch_setup(context, *args, **kwargs):
                 package='rclcpp_components',
                 executable='component_container_mt',
                 composable_node_descriptions=[pose_graph_manager_component, global_descriptor_component, map_manager_component],
-                output='both',
+                prefix=['stdbuf -o L'],
+                output='screen',
                 #  prefix="gdbgui --args",
         )
     ]
