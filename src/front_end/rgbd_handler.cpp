@@ -345,7 +345,8 @@ bool RGBDHandler::setMatches(rtabmap::Signature &from, rtabmap::Signature &to) {
   
   auto origFrom = from.sensorData().keypoints(), origTo = to.sensorData().keypoints();
   auto kptsFrom3D = from.sensorData().keypoints3D(), kptsTo3D = to.sensorData().keypoints3D();
-  auto descriptorsFrom = from.sensorData().descriptors().clone(), descriptorsTo = to.sensorData().descriptors().clone();
+  cv::Mat descriptorsFrom; from.sensorData().descriptors().convertTo(descriptorsFrom, CV_32F);
+  cv::Mat descriptorsTo; to.sensorData().descriptors().convertTo(descriptorsTo, CV_32F);
   std::list<int> fromWordIds;
   std::list<int> toWordIds;
   std::vector<int> fromWordIdsV(descriptorsFrom.rows);
@@ -547,6 +548,11 @@ if (!received_data_queue_.empty())
 
       if (generate_keyframe)
       {
+        //Reduce our descriptor size here for easier storage and transmission
+        cv::Mat fp16descriptors;
+        sensor_data.first->descriptors().convertTo(fp16descriptors, CV_16F);
+        //Maybe do this as well .... depends on what performance looks like rtabmap::compressData2(fp16descriptors);
+        sensor_data.first->setFeatures(sensor_data.first->keypoints(), sensor_data.first->keypoints3D(), fp16descriptors);
         local_descriptors_map_.insert({sensor_data.first->id(), sensor_data.first});
       }
     }

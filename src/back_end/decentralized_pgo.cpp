@@ -711,12 +711,12 @@ void DecentralizedPGO::optimized_estimates_callback(
     {
       first_pose_optimized = current_pose_estimates_->at<gtsam::Pose3>(first_symbol);
     }
-    //RCLCPP_DEBUG(node_->get_logger(), "First pose: %f %f %f - %f %f %f", first_pose.translation().x(), first_pose.translation().y(), first_pose.translation().z(), 
+    // RCLCPP_DEBUG(node_->get_logger(), "First pose: %f %f %f - %f %f %f", first_pose.translation().x(), first_pose.translation().y(), first_pose.translation().z(), 
     //                                        first_pose.rotation().pitch(), first_pose.rotation().roll(), first_pose.rotation().yaw());
-    //RCLCPP_DEBUG(node_->get_logger(), "First optimized pose: %f %f %f - %f %f %f", first_pose_optimized.translation().x(), first_pose_optimized.translation().y(), first_pose_optimized.translation().z(),
+    // RCLCPP_DEBUG(node_->get_logger(), "First optimized pose: %f %f %f - %f %f %f", first_pose_optimized.translation().x(), first_pose_optimized.translation().y(), first_pose_optimized.translation().z(),
     //                            first_pose_optimized.rotation().pitch(), first_pose_optimized.rotation().roll(), first_pose_optimized.rotation().yaw());
 
-    gtsam::Pose3 originOffset = first_pose.inverse() * first_pose_optimized;
+    gtsam::Pose3 originOffset = first_pose_optimized * first_pose.inverse();
 
     RCLCPP_DEBUG(node_->get_logger(), "Offset: %f %f %f", originOffset.translation().x(), originOffset.translation().y(), originOffset.translation().z());
 
