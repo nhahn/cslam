@@ -79,6 +79,7 @@ namespace cslam {
 		session_options = Ort::SessionOptions();
 		//session_options0.SetLogSeverityLevel(1);
 		session_options.SetInterOpNumThreads(std::thread::hardware_concurrency());
+		session_options.SetIntraOpNumThreads(std::thread::hardware_concurrency());
 
 		std::cout << "[INFO] OrtSessionOptions Append CUDAExecutionProvider" << std::endl;
 		OrtCUDAProviderOptions cuda_options{};
@@ -102,7 +103,7 @@ namespace cslam {
 		std::vector<const char*> option_values = {
 			"0",
 			"2147483648",
-			"5",
+			"1",
 			"1",
 			"1",
 			"1",
@@ -179,7 +180,10 @@ namespace cslam {
 				if(CUDA_FAILED(cudaMalloc(&cuda_resource, cuda_buffer_size))) {
 					throw new std::runtime_error("Cuda error!");
 				}
-				floatMat = cv::cuda::GpuMat(COS_RESIZE, CV_32FC3, cuda_resource);
+				floatMat = cv::cuda::GpuMat(COS_RESIZE, CV_32FC1);
+				inputR = cv::cuda::GpuMat(COS_RESIZE, CV_32FC1, cuda_resource);
+				inputG = cv::cuda::GpuMat(COS_RESIZE, CV_32FC1, cuda_resource + COS_RESIZE.area() * sizeof(float));
+				inputB = cv::cuda::GpuMat(COS_RESIZE, CV_32FC1, cuda_resource + COS_RESIZE.area() + sizeof(float) * 2);
 
 				binding.BindInput("image",
 					Ort::Value::CreateTensor<float>(
@@ -189,18 +193,25 @@ namespace cslam {
                 Ort::Value::CreateTensor<float>(
 						memory_info_cuda, (float *) output.createGpuMatHeader().cudaPtr(), (size_t) output.size().area() * sizeof(float),
 						OutputNodeShapes_[0].data(), OutputNodeShapes_[0].size()));
+
 				std::cout << "Initialied global descriptor ONNX model";
 				initialized = true;
 			}
 
 			// convert RGB to grey-scale image in [0,1]
 			if(input.channels() > 1) {
-				cv::cuda::cvtColor(input, cvtColorMat, cv::COLOR_RGB2GRAY, 3, stream);
+				cv::cuda::cvtColor(input, cvtColorMat, cv::COLOR_RGB2GRAY, 1, stream);
+				cv::cuda::resize(cvtColorMat, resizeMat, COS_RESIZE, 0, 0, 1, stream);
+				resizeMat.convertTo(floatMat, CV_32FC1, 1.0 / 255.0, 0.0, stream);
 			} else {
-				cv::cuda::cvtColor(input, cvtColorMat, cv::COLOR_GRAY2RGB, 3, stream);
+				cv::cuda::resize(input, resizeMat, COS_RESIZE, 0, 0, 1, stream);
+				resizeMat.convertTo(floatMat, CV_32FC1, 1.0 / 255.0, 0.0, stream);
             }
-			cv::cuda::resize(cvtColorMat, resizeMat, COS_RESIZE, 0, 0, 1, stream);
-			resizeMat.convertTo(floatMat, CV_32FC3, 1.0 / 255.0, 0.0, stream);
+
+			cv::cuda::subtract(floatMat, 0.485, inputR, cv::noArray(), -1, stream); cv::cuda::divide(inputR, 0.229, inputR, 1.0, -1, stream);
+			cv::cuda::subtract(floatMat, 0.456, inputG, cv::noArray(), -1, stream); cv::cuda::divide(inputG, 0.224, inputG, 1.0, -1, stream);
+			cv::cuda::subtract(floatMat, 0.406, inputB, cv::noArray(), -1, stream); cv::cuda::divide(inputB, 0.225, inputB, 1.0, -1, stream);
+
 
 			try {
 				binding.SynchronizeInputs();
@@ -332,7 +343,7 @@ int main(int argc, char *argv[])
     /* ****** Load Cfg , Mode And Image End****** */
 
     /* ****** ONNX Infer Start****** */
-    std::shared_ptr<cslam::GlobalDescriptorComponent> FeatureMatcher = std::make_shared<cslam::GlobalDescriptorComponent>("/models/cosplaceResNet18_64.onnx");
+    std::shared_ptr<cslam::GlobalDescriptorComponent> FeatureMatcher = std::make_shared<cslam::GlobalDescriptorComponent>("/models/EigenplacesResNet50_128.onnx");
 
     auto iter1 = image_matlist1.begin();
     std::string mode = "COSPLACE";

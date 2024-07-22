@@ -85,6 +85,7 @@ namespace cslam {
 			"trt_min_subgraph_size",
 			"trt_fp16_enable",
 			"trt_dla_enable",
+			"trt_dla_core",
 			// below options are strongly recommended !
 			"trt_engine_cache_enable",
 			"trt_engine_cache_path",
@@ -95,6 +96,7 @@ namespace cslam {
 			"0",
 			"2147483648",
 			"5",
+			"1",
 			"1",
 			"1",
 			"1",
@@ -121,7 +123,7 @@ namespace cslam {
 		cuda_options.user_compute_stream = stream.cudaPtr();
 		cuda_options.default_memory_arena_cfg = nullptr;
 		
-		// session_options.AppendExecutionProvider_TensorRT_V2(*tensorrt_options);
+		session_options.AppendExecutionProvider_TensorRT_V2(*tensorrt_options);
 		session_options.AppendExecutionProvider_CUDA(cuda_options);
 		session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
 
@@ -208,7 +210,10 @@ namespace cslam {
 				if(CUDA_FAILED(cudaMalloc(&cuda_resource, cuda_buffer_size))) {
 					throw new std::runtime_error("Cuda error!");
 				}
-				floatMat = cv::cuda::GpuMat(COS_RESIZE, CV_32FC3, cuda_resource);
+				floatMat = cv::cuda::GpuMat(COS_RESIZE, CV_32FC1);
+				inputR = cv::cuda::GpuMat(COS_RESIZE, CV_32FC1, cuda_resource);
+				inputG = cv::cuda::GpuMat(COS_RESIZE, CV_32FC1, cuda_resource + COS_RESIZE.area() * sizeof(float));
+				inputB = cv::cuda::GpuMat(COS_RESIZE, CV_32FC1, cuda_resource + COS_RESIZE.area() + sizeof(float) * 2);
 
 				binding.BindInput("image",
 					Ort::Value::CreateTensor<float>(
@@ -224,12 +229,17 @@ namespace cslam {
 
 			// convert RGB to grey-scale image in [0,1]
 			if(input.channels() > 1) {
-				cv::cuda::cvtColor(input, cvtColorMat, cv::COLOR_RGB2GRAY, 3, stream);
+				cv::cuda::cvtColor(input, cvtColorMat, cv::COLOR_RGB2GRAY, 1, stream);
+				cv::cuda::resize(cvtColorMat, resizeMat, COS_RESIZE, 0, 0, 1, stream);
+				resizeMat.convertTo(floatMat, CV_32FC1, 1.0 / 255.0, 0.0, stream);
 			} else {
-				cv::cuda::cvtColor(input, cvtColorMat, cv::COLOR_GRAY2RGB, 3, stream);
+				cv::cuda::resize(input, resizeMat, COS_RESIZE, 0, 0, 1, stream);
+				resizeMat.convertTo(floatMat, CV_32FC1, 1.0 / 255.0, 0.0, stream);
             }
-			cv::cuda::resize(cvtColorMat, resizeMat, COS_RESIZE, 0, 0, 1, stream);
-			resizeMat.convertTo(floatMat, CV_32FC3, 1.0 / 255.0, 0.0, stream);
+
+			cv::cuda::subtract(floatMat, 0.485, inputR, cv::noArray(), -1, stream); cv::cuda::divide(inputR, 0.229, inputR, 1.0, -1, stream);
+			cv::cuda::subtract(floatMat, 0.456, inputG, cv::noArray(), -1, stream); cv::cuda::divide(inputG, 0.224, inputG, 1.0, -1, stream);
+			cv::cuda::subtract(floatMat, 0.406, inputB, cv::noArray(), -1, stream); cv::cuda::divide(inputB, 0.225, inputB, 1.0, -1, stream);
 
 			try {
 				binding.SynchronizeInputs();
