@@ -68,8 +68,8 @@ namespace cslam {
 
 		session_options = Ort::SessionOptions();
 		//session_options0.SetLogSeverityLevel(1);
-		session_options.SetIntraOpNumThreads(std::thread::hardware_concurrency());
-		session_options.SetInterOpNumThreads(std::thread::hardware_concurrency());
+		session_options.SetIntraOpNumThreads(2);
+		session_options.SetInterOpNumThreads(2);
 		session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 		auto modelPath = get_parameter("frontend.cosplace.model").as_string();
 		std::cout << "[INFO] OrtSessionOptions Append CUDAExecutionProvider" << std::endl;

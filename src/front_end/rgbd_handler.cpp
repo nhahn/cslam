@@ -73,7 +73,7 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
   };
   lightglueConfig.grayScale = true;
   lightglueConfig.matcherUseTrt = false;
-  lightglueConfig.extractorUseTrt = false;
+  lightglueConfig.extractorUseTrt = true;
   lightglueMatcher = std::make_shared<lightglue::LightGlueDecoupleOnnxRunner>();
   lightglueMatcher->InitOrtEnv(lightglueConfig);
   lightglueMatcher->SetMatchThresh(node_->get_parameter("frontend.matcher_threshold").as_double());
@@ -576,7 +576,7 @@ void RGBDHandler::local_descriptors_request(
 {
   // Fill msg
   auto msg = std::make_unique<cslam_common_interfaces::msg::LocalImageDescriptors>();
-  clear_sensor_data(local_descriptors_map_.at(request->keyframe_id));
+
   sensor_data_to_rgbd_msg(local_descriptors_map_.at(request->keyframe_id),
                           msg->data);
   msg->keyframe_id = request->keyframe_id;
