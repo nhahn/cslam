@@ -13,6 +13,7 @@
 #include <rtabmap/core/util2d.h>
 #include <rtabmap/core/util3d.h>
 #include <rtabmap/utilite/UStl.h>
+#include <mutex>
 
 #include <message_filters/subscriber.h>
 #include <message_filters/sync_policies/approximate_time.h>
@@ -304,6 +305,7 @@ namespace cslam
         message_filters::Synchronizer<RGBDSyncPolicy> *rgbd_sync_policy_;
 
         sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_;
+        std::mutex map_mutex, prev_frame_mutex;
     };
 } // namespace cslam
 #endif

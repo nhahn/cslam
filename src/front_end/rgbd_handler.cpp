@@ -96,11 +96,14 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
                               .get_rmw_qos_profile());
 
   // Service to extract and publish local image descriptors to another robot
+  rclcpp::SubscriptionOptions descriptorOptions;
+  descriptorOptions.callback_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+
   send_local_descriptors_subscriber_ = node_->create_subscription<
       cslam_common_interfaces::msg::LocalDescriptorsRequest>(
       "cslam/local_descriptors_request", 100,
       std::bind(&RGBDHandler::local_descriptors_request, this,
-                std::placeholders::_1));
+                std::placeholders::_1), descriptorOptions);
 
   // Parameters
   node_->get_parameter("frontend.max_queue_size", max_queue_size_);
@@ -125,7 +128,7 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
       cslam_common_interfaces::msg::LocalKeyframeMatch>(
       "cslam/local_keyframe_match", 100,
       std::bind(&RGBDHandler::receive_local_keyframe_match, this,
-                std::placeholders::_1));
+                std::placeholders::_1), intraOptions);
 
   // Publishers to other robots local descriptors subscribers
   std::string local_descriptors_topic = "/cslam/local_descriptors";
@@ -149,7 +152,7 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
       cslam_common_interfaces::msg::LocalImageDescriptors>(
       "/cslam/local_descriptors", 100,
       std::bind(&RGBDHandler::receive_local_image_descriptors, this,
-                std::placeholders::_1));
+                std::placeholders::_1), interOptions);
 
   // Registration settings
   auto interParams = rtabmap::ParametersMap(rtabmap_parameters);
@@ -553,6 +556,7 @@ if (!received_data_queue_.empty())
         sensor_data.first->descriptors().convertTo(fp16descriptors, CV_16F);
         //Maybe do this as well .... depends on what performance looks like rtabmap::compressData2(fp16descriptors);
         sensor_data.first->setFeatures(sensor_data.first->keypoints(), sensor_data.first->keypoints3D(), fp16descriptors);
+        const std::lock_guard<std::mutex> lock(map_mutex);
         local_descriptors_map_.insert({sensor_data.first->id(), sensor_data.first});
       }
     }
@@ -576,9 +580,12 @@ void RGBDHandler::local_descriptors_request(
 {
   // Fill msg
   auto msg = std::make_unique<cslam_common_interfaces::msg::LocalImageDescriptors>();
-
-  sensor_data_to_rgbd_msg(local_descriptors_map_.at(request->keyframe_id),
-                          msg->data);
+  std::shared_ptr<rtabmap::SensorData> sensorData;
+  {
+    const std::lock_guard<std::mutex> lock(map_mutex);
+    sensorData = local_descriptors_map_.at(request->keyframe_id);
+  }
+  sensor_data_to_rgbd_msg(sensorData, msg->data);
   msg->keyframe_id = request->keyframe_id;
   msg->robot_id = robot_id_;
   msg->matches_robot_id = request->matches_robot_id;
@@ -605,8 +612,13 @@ void RGBDHandler::receive_local_keyframe_match(
 {
   try
   {
-    auto keyframe0 = local_descriptors_map_.at(msg->keyframe0_id);
-    auto keyframe1 = local_descriptors_map_.at(msg->keyframe1_id);
+    std::shared_ptr<rtabmap::SensorData> keyframe0;
+    std::shared_ptr<rtabmap::SensorData> keyframe1;
+    {
+      const std::lock_guard<std::mutex> lock(map_mutex);
+      keyframe0 = local_descriptors_map_.at(msg->keyframe0_id);
+      keyframe1 = local_descriptors_map_.at(msg->keyframe1_id);
+    }
     rtabmap::RegistrationInfo reg_info;
     auto from = Signature(*keyframe0), to = Signature(*keyframe1);
     auto lc = std::make_unique<cslam_common_interfaces::msg::IntraRobotLoopClosure>();
@@ -647,20 +659,6 @@ void RGBDHandler::local_descriptors_msg_to_sensor_data(
         msg,
     rtabmap::SensorData &sensor_data)
 {
-  // // Fill descriptors
-  // rtabmap::CameraModel camera_model =
-  //     rtabmap_conversions::cameraModelFromROS(msg->data.rgb_camera_info,
-  //                                     rtabmap::Transform::getIdentity());
-  // sensor_data = rtabmap::SensorData(
-  //     cv::Mat(), cv::Mat(), camera_model, 0,
-  //     rtabmap_conversions::timestampFromROS(msg->data.header.stamp));
-
-  // std::vector<cv::KeyPoint> kpts;
-  // rtabmap_conversions::keypointsFromROS(msg->data.key_points, kpts);
-  // std::vector<cv::Point3f> kpts3D;
-  // rtabmap_conversions::points3fFromROS(msg->data.points, kpts3D);
-  // auto descriptors = rtabmap::uncompressData(msg->data.descriptors);
-  // sensor_data.setFeatures(kpts, kpts3D, descriptors);
   sensor_data = rtabmap_conversions::sensorDataFromROS(msg->data);
 }
 
@@ -688,7 +686,11 @@ void RGBDHandler::receive_local_image_descriptors(
       // Compute transformation
       //  Registration params
       rtabmap::RegistrationInfo reg_info;
-      auto tmp_from = local_descriptors_map_.at(local_keyframe_id);
+      std::shared_ptr<rtabmap::SensorData> tmp_from;
+      {
+        const std::lock_guard<std::mutex> lock(map_mutex);
+        tmp_from = local_descriptors_map_.at(local_keyframe_id);
+      }
       auto from = Signature(*tmp_from), to = Signature(tmp_to);
       setMatches(from, to);
       rtabmap::Transform t = inter_registration_.computeTransformation(

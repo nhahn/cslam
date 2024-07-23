@@ -80,7 +80,6 @@ namespace cslam {
 		Ort::ThrowOnError(api.CreateTensorRTProviderOptions(&tensorrt_options));
 					
 		std::vector<const char*> option_keys = {
-			"device_id",
 			"trt_max_workspace_size",
 			"trt_min_subgraph_size",
 			"trt_fp16_enable",
@@ -93,7 +92,6 @@ namespace cslam {
 			"trt_timing_cache_path",
 		};
 		std::vector<const char*> option_values = {
-			"0",
 			"2147483648",
 			"5",
 			"1",
