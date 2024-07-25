@@ -297,7 +297,7 @@ void DecentralizedPGO::odometry_callback(
   {
     gtsam::Pose3 odom_diff = latest_local_pose_.inverse() * current_estimate;
     gtsam::BetweenFactor<gtsam::Pose3> factor(latest_local_symbol_, symbol,
-                                              odom_diff, loop_noise_model);
+                                              odom_diff, noise);
     pose_graph_->push_back(factor);
   }
 
@@ -333,7 +333,7 @@ void DecentralizedPGO::intra_robot_loop_closure_callback(
 
     gtsam::BetweenFactor<gtsam::Pose3> factor =
         gtsam::BetweenFactor<gtsam::Pose3>(symbol_from, symbol_to, measurement,
-                                           loop_noise_model);
+                                           noise);
     pose_graph_->push_back(factor);
     // auto fromPose = odometry_pose_estimates_->at<gtsam::Pose3>(symbol_from);
     // auto toPose =  odometry_pose_estimates_->at<gtsam::Pose3>(symbol_to);
@@ -430,16 +430,16 @@ bool DecentralizedPGO::is_optimizer()
   return is_optimizer;
 }
 
-cslam_common_interfaces::msg::PoseGraph DecentralizedPGO::fill_pose_graph_msg(){
+cslam_common_interfaces::msg::PoseGraph::UniquePtr DecentralizedPGO::fill_pose_graph_msg(){
   auto current_robots_ids = current_neighbors_ids_;
   current_robots_ids.robots.ids.push_back(robot_id_);
   return fill_pose_graph_msg(current_robots_ids.robots);
 }
 
-cslam_common_interfaces::msg::PoseGraph DecentralizedPGO::fill_pose_graph_msg(const cslam_common_interfaces::msg::RobotIds& msg){
-  cslam_common_interfaces::msg::PoseGraph out_msg;
-  out_msg.robot_id = robot_id_;
-  out_msg.values = gtsam_values_to_msg(odometry_pose_estimates_);
+cslam_common_interfaces::msg::PoseGraph::UniquePtr DecentralizedPGO::fill_pose_graph_msg(const cslam_common_interfaces::msg::RobotIds& msg){
+  auto out_msg = std::make_unique<cslam_common_interfaces::msg::PoseGraph>();
+  out_msg->robot_id = robot_id_;
+  out_msg->values = gtsam_values_to_msg(odometry_pose_estimates_);
   auto graph = std::make_shared<gtsam::NonlinearFactorGraph>();
   graph->push_back(pose_graph_->begin(), pose_graph_->end());
 
@@ -466,25 +466,25 @@ cslam_common_interfaces::msg::PoseGraph DecentralizedPGO::fill_pose_graph_msg(co
     }
   }
 
-  out_msg.edges = gtsam_factors_to_msg(graph);
+  out_msg->edges = gtsam_factors_to_msg(graph);
   for (auto id : connected_robots)
   {
     if (id != robot_id_)
     {
-      out_msg.connected_robots.ids.push_back(id);
+      out_msg->connected_robots.ids.push_back(id);
     }
   }
 
   if (enable_gps_recording_) {
     for (auto gps : gps_data_) {
-      out_msg.gps_values_idx.push_back(gps.first);
-      out_msg.gps_values.push_back(gps.second);
+      out_msg->gps_values_idx.push_back(gps.first);
+      out_msg->gps_values.push_back(gps.second);
     }
   }
   
   // If logging, add extra data
   if (enable_logs_) {
-    logger_->fill_msg(out_msg);
+    logger_->fill_msg(*out_msg.get());
   }
 
   return out_msg;
@@ -494,7 +494,7 @@ void DecentralizedPGO::get_pose_graph_callback(
     const cslam_common_interfaces::msg::RobotIds::ConstSharedPtr msg)
 {
   auto out_msg = fill_pose_graph_msg(*msg);
-  pose_graph_publisher_->publish(out_msg);
+  pose_graph_publisher_->publish(std::move(out_msg));
   tentative_local_pose_at_latest_optimization_ = latest_local_pose_;
 }
 
@@ -518,7 +518,7 @@ void DecentralizedPGO::pose_graph_callback(
       end_waiting();
       optimizer_state_ = OptimizerState::START_OPTIMIZATION;
       if (enable_logs_){
-        logger_->add_pose_graph_log_info(fill_pose_graph_msg());
+        logger_->add_pose_graph_log_info(*fill_pose_graph_msg());
       }
     }
   }
@@ -741,14 +741,14 @@ void DecentralizedPGO::share_optimized_estimates(
   included_robots_ids.robots.ids.push_back(robot_id_);
   for (unsigned int i = 0; i < included_robots_ids.robots.ids.size(); i++)
   {
-    cslam_common_interfaces::msg::OptimizationResult msg;
+    auto msg = std::make_unique<cslam_common_interfaces::msg::OptimizationResult>();
     auto vals = estimates.extract<gtsam::Pose3>(gtsam::LabeledSymbol::LabelTest(
             ROBOT_LABEL(included_robots_ids.robots.ids[i])));
-    msg.success = true;
-    msg.origin_robot_id = origin_robot_id_;
-    msg.estimates = gtsam_values_to_msg(vals);
+    msg->success = true;
+    msg->origin_robot_id = origin_robot_id_;
+    msg->estimates = gtsam_values_to_msg(vals);
     optimized_estimates_publishers_[included_robots_ids.robots.ids[i]]->publish(
-        msg);
+        std::move(msg));
   }
 }
 
@@ -769,10 +769,10 @@ void DecentralizedPGO::visualization_callback()
 {
   if (visualization_pose_graph_publisher_->get_subscription_count() > 0)
   {
-    cslam_common_interfaces::msg::PoseGraph out_msg;
-    out_msg.robot_id = robot_id_;
-    out_msg.origin_robot_id = origin_robot_id_;
-    out_msg.values = gtsam_values_to_msg(current_pose_estimates_);
+    auto out_msg = std::make_unique<cslam_common_interfaces::msg::PoseGraph>();
+    out_msg->robot_id = robot_id_;
+    out_msg->origin_robot_id = origin_robot_id_;
+    out_msg->values = gtsam_values_to_msg(current_pose_estimates_);
     auto graph = std::make_shared<gtsam::NonlinearFactorGraph>();
     graph->push_back(pose_graph_->begin(), pose_graph_->end());
 
@@ -795,8 +795,8 @@ void DecentralizedPGO::visualization_callback()
       }
     }
 
-    out_msg.edges = gtsam_factors_to_msg(graph);
-    visualization_pose_graph_publisher_->publish(out_msg);
+    out_msg->edges = gtsam_factors_to_msg(graph);
+    visualization_pose_graph_publisher_->publish(std::move(out_msg));
   }
 }
 
@@ -814,10 +814,10 @@ void DecentralizedPGO::update_transform_to_origin(const gtsam::Pose3 &pose)
   // one robot reference frame to another.
   if (reference_frame_per_robot_publisher_->get_subscription_count() > 0)
   {
-    cslam_common_interfaces::msg::ReferenceFrames msg;
-    msg.robot_id = robot_id_;
-    msg.origin_to_local = origin_to_first_pose_;
-    reference_frame_per_robot_publisher_->publish(msg);
+    auto msg = std::make_unique<cslam_common_interfaces::msg::ReferenceFrames>();
+    msg->robot_id = robot_id_;
+    msg->origin_to_local = origin_to_first_pose_;
+    reference_frame_per_robot_publisher_->publish(std::move(msg));
     //Attach the original transform for offsetting the odom link
     //msg.transforms.emplace_back(gtsam_pose_to_transform_msg(origin_to_odom));
   }

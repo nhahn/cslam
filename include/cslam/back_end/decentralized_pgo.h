@@ -113,14 +113,14 @@ namespace cslam
          *
          * @return cslam_common_interfaces::msg::PoseGraph
          */
-        cslam_common_interfaces::msg::PoseGraph fill_pose_graph_msg();
+        cslam_common_interfaces::msg::PoseGraph::UniquePtr fill_pose_graph_msg();
 
         /**
          * @brief Fill a PoseGraph message with the local data
          *
          * @return cslam_common_interfaces::msg::PoseGraph
          */
-        cslam_common_interfaces::msg::PoseGraph fill_pose_graph_msg(const cslam_common_interfaces::msg::RobotIds &msg);
+        cslam_common_interfaces::msg::PoseGraph::UniquePtr fill_pose_graph_msg(const cslam_common_interfaces::msg::RobotIds &msg);
 
         /**
          * @brief Receives request for pose graph

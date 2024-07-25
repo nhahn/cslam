@@ -304,8 +304,7 @@ void RGBDHandler::compute_local_descriptors(
 {
   // Extract local descriptors
   frame_data->uncompressData();
-  std::vector<cv::KeyPoint> kpts_from;
-  cv::Mat image = frame_data->imageRaw();
+  const cv::Mat image = frame_data->imageRaw();
 
   cv::Mat depth_mask;
   if (!frame_data->depthRaw().empty())
@@ -330,8 +329,7 @@ void RGBDHandler::compute_local_descriptors(
   }
 
   auto extData = lightglueMatcher->Extractor(lightglueConfig, image);
-  auto descriptors = extData.second;
-  auto keypoints = std::move(extData.first);
+  const auto keypoints = std::move(extData.first);
   std::vector<cv::Point3f> kpts3D;
   if (!depth_mask.empty()) {
     //detector_->filterKeypointsByDepth(keypoints, depth_mask, 0.01f, 30.0f);
@@ -341,13 +339,13 @@ void RGBDHandler::compute_local_descriptors(
     //detector_->filterKeypointsByDepth(keypoints, descriptors, kpts3D, 0.01f, 30.0f);
   }
   //RCLCPP_INFO(node_->get_logger(), "Data about things %d %d %d", keypoints.size(), descriptors.rows, kpts3D.size());
-  frame_data->setFeatures(keypoints, kpts3D, descriptors);
+  frame_data->setFeatures(keypoints, kpts3D, extData.second);
 }
 
 bool RGBDHandler::setMatches(rtabmap::Signature &from, rtabmap::Signature &to) {
   
-  auto origFrom = from.sensorData().keypoints(), origTo = to.sensorData().keypoints();
-  auto kptsFrom3D = from.sensorData().keypoints3D(), kptsTo3D = to.sensorData().keypoints3D();
+  const auto origFrom = from.sensorData().keypoints(), origTo = to.sensorData().keypoints();
+  const auto kptsFrom3D = from.sensorData().keypoints3D(), kptsTo3D = to.sensorData().keypoints3D();
   cv::Mat descriptorsFrom; from.sensorData().descriptors().convertTo(descriptorsFrom, CV_32F);
   cv::Mat descriptorsTo; to.sensorData().descriptors().convertTo(descriptorsTo, CV_32F);
   std::list<int> fromWordIds;
@@ -361,11 +359,11 @@ bool RGBDHandler::setMatches(rtabmap::Signature &from, rtabmap::Signature &to) {
     fromWordIdsV[i] = id;
   }
 
-  auto fromModel = from.sensorData().stereoCameraModels().size() > 0? from.sensorData().stereoCameraModels()[0].left() : from.sensorData().cameraModels()[0];
-  auto toModel = to.sensorData().stereoCameraModels().size() > 0? to.sensorData().stereoCameraModels()[0].left() : to.sensorData().cameraModels()[0];
+  const auto fromModel = from.sensorData().stereoCameraModels().size() > 0? from.sensorData().stereoCameraModels()[0].left() : from.sensorData().cameraModels()[0];
+  const auto toModel = to.sensorData().stereoCameraModels().size() > 0? to.sensorData().stereoCameraModels()[0].left() : to.sensorData().cameraModels()[0];
 
-  std::vector<cv::Point2f> kptsFrom = NormKeypoints(origFrom, fromModel.imageHeight(), fromModel.imageWidth());
-  std::vector<cv::Point2f> kptsTo = NormKeypoints(origTo, toModel.imageHeight(), toModel.imageWidth());
+  const std::vector<cv::Point2f> kptsFrom = NormKeypoints(origFrom, fromModel.imageHeight(), fromModel.imageWidth());
+  const std::vector<cv::Point2f> kptsTo = NormKeypoints(origTo, toModel.imageHeight(), toModel.imageWidth());
   
   //RCLCPP_INFO(node_->get_logger(), "Data about things %d %d -- %d %d", kptsTo.size(), kptsFrom.size(), descriptorsTo.rows, descriptorsFrom.rows);
 
@@ -680,8 +678,8 @@ void RGBDHandler::receive_local_image_descriptors(
   {
     try
     {
-      rtabmap::SensorData tmp_to;
-      local_descriptors_msg_to_sensor_data(msg, tmp_to);
+      rtabmap::Signature to;
+      local_descriptors_msg_to_sensor_data(msg, to.sensorData());
 
       // Compute transformation
       //  Registration params
@@ -691,7 +689,7 @@ void RGBDHandler::receive_local_image_descriptors(
         const std::lock_guard<std::mutex> lock(map_mutex);
         tmp_from = local_descriptors_map_.at(local_keyframe_id);
       }
-      auto from = Signature(*tmp_from), to = Signature(tmp_to);
+      auto from = Signature(*tmp_from);
       setMatches(from, to);
       rtabmap::Transform t = inter_registration_.computeTransformation(
         from, to, rtabmap::Transform(), &reg_info);
