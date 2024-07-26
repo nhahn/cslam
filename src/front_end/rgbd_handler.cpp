@@ -32,6 +32,7 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
   node_->declare_parameter<std::string>("frontend.sensor_base_frame_id", ""); // If empty we assume that the camera link is the base link
   node_->declare_parameter<bool>("evaluation.enable_logs", false);
   node_->get_parameter("frontend.max_queue_size", max_queue_size_);
+  node_->get_parameter("frontend.keypoint_3d_rejection_threshold", keypoint_3d_rejection_threshold_);
   node_->get_parameter("frontend.keyframe_generation_ratio_threshold", keyframe_generation_ratio_threshold_);
   node_->get_parameter("frontend.sensor_base_frame_id", base_frame_id_);
   node_->get_parameter("visualization.enable",
@@ -72,7 +73,7 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
     node_->get_parameter("frontend.lightglue_model").as_string()
   };
   lightglueConfig.grayScale = true;
-  lightglueConfig.matcherUseTrt = false;
+  lightglueConfig.matcherUseTrt = true;
   lightglueConfig.extractorUseTrt = true;
   lightglueMatcher = std::make_shared<lightglue::LightGlueDecoupleOnnxRunner>();
   lightglueMatcher->InitOrtEnv(lightglueConfig);
@@ -299,7 +300,7 @@ std::vector<cv::Point2f> NormKeypoints(std::vector<cv::KeyPoint> kpts, int h, in
     return normalizedKpts;
 }
 
-void RGBDHandler::compute_local_descriptors(
+bool RGBDHandler::compute_local_descriptors(
     std::shared_ptr<rtabmap::SensorData> &frame_data)
 {
   // Extract local descriptors
@@ -329,17 +330,17 @@ void RGBDHandler::compute_local_descriptors(
   }
 
   auto extData = lightglueMatcher->Extractor(lightglueConfig, image);
-  const auto keypoints = std::move(extData.first);
-  std::vector<cv::Point3f> kpts3D;
-  if (!depth_mask.empty()) {
-    //detector_->filterKeypointsByDepth(keypoints, depth_mask, 0.01f, 30.0f);
-    kpts3D = detector_->generateKeypoints3D(*frame_data, keypoints);
-  } else {
-    kpts3D = detector_->generateKeypoints3D(*frame_data, keypoints);
-    //detector_->filterKeypointsByDepth(keypoints, descriptors, kpts3D, 0.01f, 30.0f);
+  std::vector<cv::Point3f> kpts3D = detector_->generateKeypoints3D(*frame_data, extData.first);
+  if(kpts3D.size() < extData.first.size() * keypoint_3d_rejection_threshold_){
+    RCLCPP_INFO(node_->get_logger(), "Rejecting keyframe due to the low number of 3D keypoints detected (%d/%d)",kpts3D.size(), extData.first.size());
+    return false;
   }
+  //Reduce our descriptor size here for easier storage and transmission
+  cv::Mat fp16descriptors;
+  extData.second.convertTo(fp16descriptors, CV_16F);
   //RCLCPP_INFO(node_->get_logger(), "Data about things %d %d %d", keypoints.size(), descriptors.rows, kpts3D.size());
-  frame_data->setFeatures(keypoints, kpts3D, extData.second);
+  frame_data->setFeatures(extData.first, kpts3D, fp16descriptors);
+  return true;
 }
 
 bool RGBDHandler::setMatches(rtabmap::Signature &from, rtabmap::Signature &to) {
@@ -528,9 +529,8 @@ if (!received_data_queue_.empty())
     if (sensor_data.first->isValid())
     {
       // Compute local descriptors
-      compute_local_descriptors(sensor_data.first);
-
-      bool generate_keyframe = generate_new_keyframe(sensor_data.first);
+      bool generate_keyframe = compute_local_descriptors(sensor_data.first) //See if we have good keypoints
+                            && generate_new_keyframe(sensor_data.first); //Then check for overlap wtih the previous frame
       if (generate_keyframe)
       {
         // Set keyframe ID
@@ -549,11 +549,7 @@ if (!received_data_queue_.empty())
 
       if (generate_keyframe)
       {
-        //Reduce our descriptor size here for easier storage and transmission
-        cv::Mat fp16descriptors;
-        sensor_data.first->descriptors().convertTo(fp16descriptors, CV_16F);
-        //Maybe do this as well .... depends on what performance looks like rtabmap::compressData2(fp16descriptors);
-        sensor_data.first->setFeatures(sensor_data.first->keypoints(), sensor_data.first->keypoints3D(), fp16descriptors);
+
         const std::lock_guard<std::mutex> lock(map_mutex);
         local_descriptors_map_.insert({sensor_data.first->id(), sensor_data.first});
       }

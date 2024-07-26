@@ -93,10 +93,10 @@ namespace cslam {
 		};
 		std::vector<const char*> option_values = {
 			"2147483648",
-			"5",
+			"3",
 			"1",
 			"1",
-			"1",
+			"0",
 			"1",
 			path.c_str(),
 			"1",
