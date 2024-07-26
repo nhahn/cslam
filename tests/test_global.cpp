@@ -23,6 +23,7 @@
 
 #include <opencv2/cudaimgproc.hpp>
 #include <opencv2/cudawarping.hpp>
+#include <ament_index_cpp/get_package_share_directory.hpp>
 
 namespace fs = std::filesystem;
 
@@ -330,10 +331,10 @@ int main(int argc, char *argv[])
 {
     /* ****** CONFIG START ****** */
 
-
-    fs::path image_path1 = fs::current_path() / "assets/DSC_0410.JPG";
-    fs::path image_path2 = fs::current_path() / "assets/DSC_0411.JPG";
-    fs::path save_path = fs::current_path() / "assets/";
+	auto containerDir = fs::path(ament_index_cpp::get_package_share_directory("lightglue_onnx"));
+    fs::path image_path1 = containerDir / "assets/DSC_0410.JPG";
+    fs::path image_path2 = containerDir / "assets/DSC_0411.JPG";
+    fs::path save_path = containerDir / "assets/";
 
     std::vector<cv::String> image_filelist1 {image_path1.string(), image_path1.string(), image_path1.string(), image_path2.string()};
     std::vector<cv::String> image_filelist2 {image_path2.string(), image_path2.string(), image_path2.string(), image_path1.string()};

@@ -168,16 +168,17 @@ target_include_directories(global_descriptor_component PUBLIC
 rclcpp_components_register_node(global_descriptor_component PLUGIN "cslam::GlobalDescriptorComponent" EXECUTABLE global_descriptor)
 set(node_plugins "${node_plugins}cslam::GlobalDescriptorComponent;$<TARGET_FILE:global_descriptor_component>\n")
 
-cuda_add_executable(cosplace_test tests/test_global.cpp)
-target_include_directories(cosplace_test PUBLIC
+cuda_add_executable(cosplace_initializer tests/test_global.cpp)
+target_include_directories(cosplace_initializer PUBLIC
   ${OpenCV_INCLUDE_DIRS}
   ${ONNXRuntime_INCLUDE_DIR}
   ${CUDA_INCLUDE_DIRS}
   $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_INCLUDEDIR}>
 )
-target_link_libraries(cosplace_test ${ONNXRuntime_LIBRARIES} ${OpenCV_LIBRARIES})
-set_property(TARGET cosplace_test PROPERTY CXX_STANDARD 17)
-install(TARGETS cosplace_test RUNTIME DESTINATION ${CMAKE_SOURCE_DIR}/tests)
+ament_target_dependencies(cosplace_initializer )
+target_link_libraries(cosplace_initializer ${ONNXRuntime_LIBRARIES} ${OpenCV_LIBRARIES})
+ament_target_dependencies(cosplace_initializer ament_cmake ament_index_cpp)
+set_property(TARGET cosplace_initializer PROPERTY CXX_STANDARD 17)
 
 # Only required when using messages built from the same package
 # https://index.ros.org/doc/ros2/Tutorials/Rosidl-Tutorial/
@@ -190,6 +191,16 @@ install(DIRECTORY include/${PROJECT_NAME}/
    DESTINATION include/${PROJECT_NAME}
    FILES_MATCHING PATTERN "*.h"
    PATTERN ".svn" EXCLUDE
+)
+
+install(
+  TARGETS cosplace_initializer
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(DIRECTORY 
+   tests/assets
+   DESTINATION share/${PROJECT_NAME}/
 )
 
 install(DIRECTORY 
