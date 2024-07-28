@@ -366,7 +366,7 @@ bool RGBDHandler::setMatches(rtabmap::Signature &from, rtabmap::Signature &to) {
   const std::vector<cv::Point2f> kptsFrom = NormKeypoints(origFrom, fromModel.imageHeight(), fromModel.imageWidth());
   const std::vector<cv::Point2f> kptsTo = NormKeypoints(origTo, toModel.imageHeight(), toModel.imageWidth());
   
-  //RCLCPP_INFO(node_->get_logger(), "Data about things %d %d -- %d %d", kptsTo.size(), kptsFrom.size(), descriptorsTo.rows, descriptorsFrom.rows);
+  RCLCPP_INFO(node_->get_logger(), "Maching: %d %d -- %d %d", kptsTo.size(), kptsFrom.size(), descriptorsTo.rows, descriptorsFrom.rows);
 
   auto matches = lightglueMatcher->MatcherIdx(lightglueConfig, kptsTo, kptsFrom, descriptorsTo, descriptorsFrom);
   //RCLCPP_INFO(node_->get_logger(), "Matches:  %d", matches.size());
