@@ -115,7 +115,6 @@ SET(Libraries
 find_package(cslam_common_interfaces REQUIRED)
 set(node_plugins "")
 
-set(pose_graph_manager_component ${comp}_component)
 add_library(pose_graph_manager_component SHARED
   src/back_end/decentralized_pgo.cpp
   src/back_end/pose_graph_manager_component.cpp
@@ -132,7 +131,6 @@ target_include_directories(pose_graph_manager_component PUBLIC
 rclcpp_components_register_node(pose_graph_manager_component PLUGIN "cslam::PoseGraphManagerComponent" EXECUTABLE pose_graph_manager)
 set(node_plugins "${node_plugins}cslam::PoseGraphManagerComponent;$<TARGET_FILE:pose_graph_manager_component>\n")
 
-set(map_manager_component ${comp}_component)
 add_library(map_manager_component SHARED
   src/front_end/map_manager.cpp 
   src/front_end/map_manager_component.cpp 
@@ -151,34 +149,17 @@ rclcpp_components_register_node(map_manager_component PLUGIN "cslam::MapManagerC
 set(node_plugins "${node_plugins}cslam::MapManagerComponent;$<TARGET_FILE:map_manager_component>\n")
 
 cuda_add_library(global_descriptor_component SHARED
-  src/back_end/global_descriptor_component.cpp
+  src/front_end/global_descriptor_component.cpp
 )
 target_link_libraries(global_descriptor_component ${ONNXRuntime_LIBRARIES})
-ament_export_dependencies(OpenCV CUDA)
 ament_target_dependencies(global_descriptor_component 
   ${Libraries}  
-  cslam_common_interfaces)
+  cslam_common_interfaces lightglue_onnx)
 target_include_directories(global_descriptor_component PUBLIC
-  ${OpenCV_INCLUDE_DIRS}
-  ${ONNXRuntime_INCLUDE_DIR}
-  ${CUDA_INCLUDE_DIRS}
   $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_INCLUDEDIR}>
 )
-
 rclcpp_components_register_node(global_descriptor_component PLUGIN "cslam::GlobalDescriptorComponent" EXECUTABLE global_descriptor)
 set(node_plugins "${node_plugins}cslam::GlobalDescriptorComponent;$<TARGET_FILE:global_descriptor_component>\n")
-
-cuda_add_executable(cosplace_initializer tests/test_global.cpp)
-target_include_directories(cosplace_initializer PUBLIC
-  ${OpenCV_INCLUDE_DIRS}
-  ${ONNXRuntime_INCLUDE_DIR}
-  ${CUDA_INCLUDE_DIRS}
-  $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_INCLUDEDIR}>
-)
-ament_target_dependencies(cosplace_initializer )
-target_link_libraries(cosplace_initializer ${ONNXRuntime_LIBRARIES} ${OpenCV_LIBRARIES})
-ament_target_dependencies(cosplace_initializer ament_cmake ament_index_cpp)
-set_property(TARGET cosplace_initializer PROPERTY CXX_STANDARD 17)
 
 # Only required when using messages built from the same package
 # https://index.ros.org/doc/ros2/Tutorials/Rosidl-Tutorial/
@@ -191,16 +172,6 @@ install(DIRECTORY include/${PROJECT_NAME}/
    DESTINATION include/${PROJECT_NAME}
    FILES_MATCHING PATTERN "*.h"
    PATTERN ".svn" EXCLUDE
-)
-
-install(
-  TARGETS cosplace_initializer
-  DESTINATION lib/${PROJECT_NAME}
-)
-
-install(DIRECTORY 
-   tests/assets
-   DESTINATION share/${PROJECT_NAME}/
 )
 
 install(DIRECTORY 
