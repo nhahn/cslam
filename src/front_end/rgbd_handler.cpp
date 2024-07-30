@@ -32,7 +32,7 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
   node_->declare_parameter<std::string>("frontend.sensor_base_frame_id", ""); // If empty we assume that the camera link is the base link
   node_->declare_parameter<bool>("evaluation.enable_logs", false);
   node_->get_parameter("frontend.max_queue_size", max_queue_size_);
-  node_->get_parameter("frontend.keypoint_3d_rejection_threshold", keypoint_3d_rejection_threshold_);
+  node_->get_parameter("frontend.min_3d_keypoints", min_3d_keypoints_);
   node_->get_parameter("frontend.keyframe_generation_ratio_threshold", keyframe_generation_ratio_threshold_);
   node_->get_parameter("frontend.sensor_base_frame_id", base_frame_id_);
   node_->get_parameter("visualization.enable",
@@ -338,8 +338,8 @@ bool RGBDHandler::compute_local_descriptors(
     }
   }
 
-  if(valid3DKpts < extData.first.size() * keypoint_3d_rejection_threshold_){
-    RCLCPP_INFO(node_->get_logger(), "Rejecting keyframe due to the low number of 3D keypoints detected (%d/%d)", valid3DKpts, extData.first.size());
+  if(valid3DKpts < min_3d_keypoints_){
+    RCLCPP_DEBUG(node_->get_logger(), "Rejecting keyframe due to the low number of 3D keypoints detected (%d/%d) - min ", valid3DKpts, extData.first.size(), min_3d_keypoints_);
     return false;
   }
   //Reduce our descriptor size here for easier storage and transmission

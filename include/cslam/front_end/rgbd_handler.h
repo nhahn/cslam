@@ -272,7 +272,7 @@ namespace cslam
 
         std::string base_frame_id_;
         float keyframe_generation_ratio_threshold_;
-        float keypoint_3d_rejection_threshold_;
+        int min_3d_keypoints_;
         bool generate_new_keyframes_based_on_inliers_ratio_;
 
         unsigned int visualization_period_ms_;

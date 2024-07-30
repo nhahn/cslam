@@ -25,8 +25,8 @@ namespace cslam {
 
 	  GlobalDescriptorComponent(rclcpp::NodeOptions ops) : Node("global_descriptor_node", ops)
 	  {
-		declare_parameter<std::string>("frontend.model", "/models/trt_engines/EigenplacesResNet50_128.engine");
-		std::filesystem::path model (get_parameter("frontend.model").as_string());
+		declare_parameter<std::string>("frontend.global_model", "/models/trt_engines/EigenplacesResNet50_128.engine");
+		std::filesystem::path model (get_parameter("frontend.global_model").as_string());
 		if (model.extension() == ".onnx") {
 			RCLCPP_INFO(get_logger(), "Initialized ONNX global descriptor node");
 			GlobalMatcher = std::make_shared<cslam::GeoNetOnnxRunner>(model);
