@@ -27,7 +27,7 @@ namespace cslam {
         ULogger::setLevel(level == rtabmapLogLevel.end()? ULogger::kWarning : level->second);
 
         declare_parameter<int>("frontend.pnp_min_inliers", 20);
-        declare_parameter<float>("frontend.min_3d_keypoints", 100);
+        declare_parameter<int>("frontend.min_3d_keypoints", 100);
         declare_parameter<int>("frontend.inter_pnp_min_inliers", get_parameter("frontend.pnp_min_inliers").as_int());
         declare_parameter<int>("frontend.intra_pnp_min_inliers", get_parameter("frontend.pnp_min_inliers").as_int());
         declare_parameter<int>("frontend.max_queue_size", 10);

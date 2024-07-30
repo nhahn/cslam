@@ -378,99 +378,88 @@ bool RGBDHandler::setMatches(rtabmap::Signature &from, rtabmap::Signature &to) {
   auto matches = lightglueMatcher->MatcherIdx(lightglueConfig, normTo, normFrom, descriptorsTo, descriptorsFrom);
   //Query = TO keypoints, Train = FROM Keypoints
 
-  // RCLCPP_INFO(node_->get_logger(), "Matches:  %d", matches.size());
-  // if(matches.size() < 10) {
-  //   return false;
-  // }
+  if(matches.size() == 0) {
+    RCLCPP_INFO(node_->get_logger(), "Matching failed -- zero matches recieved");
+    return false;
+  }
 
-    std::multimap<int, int> wordsFrom;
-    std::multimap<int, int> wordsTo;
-    std::vector<cv::KeyPoint> wordsKptsFrom;
-    std::vector<cv::KeyPoint> wordsKptsTo;
-    std::vector<cv::Point3f> words3From;
-    std::vector<cv::Point3f> words3To;
+  std::multimap<int, int> wordsFrom;
+  std::multimap<int, int> wordsTo;
+  std::vector<cv::KeyPoint> wordsKptsFrom;
+  std::vector<cv::KeyPoint> wordsKptsTo;
+  std::vector<cv::Point3f> words3From;
+  std::vector<cv::Point3f> words3To;
 
 
-    for(size_t i=0; i<matches.size(); ++i)
-    {
-        auto matchId = matches[i].trainIdx;
-        auto toId = matches[i].queryIdx;
-        wordsFrom.insert(wordsFrom.end(), std::make_pair(i, wordsFrom.size()));
-        wordsKptsFrom.push_back(kptsFrom[matchId]);
-        words3From.push_back(kptsFrom3D[matchId]);
+  for(size_t i=0; i<matches.size(); ++i)
+  {
+      auto matchId = matches[i].trainIdx;
+      auto toId = matches[i].queryIdx;
+      wordsFrom.insert(wordsFrom.end(), std::make_pair(i, wordsFrom.size()));
+      wordsKptsFrom.push_back(kptsFrom[matchId]);
+      words3From.push_back(kptsFrom3D[matchId]);
 
-        wordsTo.insert(wordsTo.end(), std::make_pair(i, wordsTo.size()));
-        wordsKptsTo.push_back(kptsTo[toId]);
-        if(!kptsTo3D.empty())
-        {
-          words3To.push_back(kptsTo3D[toId]);
-        }
-        // if (i > 5 && i < 11) {
-        //   RCLCPP_INFO(node_->get_logger(), "Example matches  - %d -> %d : %f - %f", matchId, toId, kptsFrom[matchId].pt.x, kptsTo[toId].pt.x);
-        // }
+      wordsTo.insert(wordsTo.end(), std::make_pair(i, wordsTo.size()));
+      wordsKptsTo.push_back(kptsTo[toId]);
+      if(!kptsTo3D.empty())
+      {
+        words3To.push_back(kptsTo3D[toId]);
+      }
+      // if (i > 5 && i < 11) {
+      //   RCLCPP_INFO(node_->get_logger(), "Example matches  - %d -> %d : %f - %f", matchId, toId, kptsFrom[matchId].pt.x, kptsTo[toId].pt.x);
+      // }
 
-    }
+  }
 
-    from.setWords(wordsFrom, wordsKptsFrom, words3From, cv::Mat());
-    to.setWords(wordsTo, wordsKptsTo, words3To, cv::Mat());
-    return true;
+  from.setWords(wordsFrom, wordsKptsFrom, words3From, cv::Mat());
+  to.setWords(wordsTo, wordsKptsTo, words3To, cv::Mat());
+  return true;
 }
 
 bool RGBDHandler::generate_new_keyframe(std::shared_ptr<rtabmap::SensorData> &keyframe)
 {
   // Keyframe generation heuristic
-  bool generate_new_keyframe = true;
-  if (generate_new_keyframes_based_on_inliers_ratio_)
-  {
-    if (nb_local_keyframes_ > 0)
-    {
-      try
-      {
-        rtabmap::RegistrationInfo reg_info;
-        auto from = Signature(*previous_keyframe_), to = Signature(*keyframe);
-        setMatches(from, to);
-        rtabmap::Transform t = intra_registration_.computeTransformation(
-            from, to, rtabmap::Transform(), &reg_info);
-        
-        if (!t.isNull())
-        {
-          if (float(reg_info.inliers) >
-              keyframe_generation_ratio_threshold_ *
-                  float(previous_keyframe_->keypoints3D().size()))
-          {
-            generate_new_keyframe = false;
-          }
-          //RCLCPP_INFO(node_->get_logger(), "Inliers from matching: %d - gen KF %s", reg_info.inliers, generate_new_keyframe? "yes":"no");
-        } else {
+  if (!generate_new_keyframes_based_on_inliers_ratio_)
+    return true;
 
-          //RCLCPP_INFO(node_->get_logger(), "Couldnt compute transform: %d - 3d kpts %d %d - ratio %f - matches %d", reg_info.inliers,
-          //                  from.sensorData().keypoints3D().size(), to.sensorData().keypoints3D().size(), reg_info.inliersRatio, reg_info.matches);
-        }
-        
-        if (from.sensorData().keypoints3D().size() < 20) {
-          //We have no depth data, this is a useless keyframe to us
-          generate_new_keyframe = false;
-        }
-      }
-      catch (std::exception &e)
+  if (nb_local_keyframes_ > 0)
+  {
+    auto from = Signature(*previous_keyframe_), to = Signature(*keyframe);
+    bool hasMaches = setMatches(from, to);
+    if (!hasMaches)
+      return true;
+
+    try
+    {
+      rtabmap::RegistrationInfo reg_info;
+      rtabmap::Transform t = intra_registration_.computeTransformation(
+          from, to, rtabmap::Transform(), &reg_info);
+      
+      if (!t.isNull())
       {
-        RCLCPP_WARN(
-            node_->get_logger(),
-            "Exception: Could not compute transformation for keyframe generation: %s",
-            e.what());
+        if (float(reg_info.inliers) >
+            keyframe_generation_ratio_threshold_ *
+                float(previous_keyframe_->keypoints().size()))
+        {
+          return false;
+        }
+      } else {
+        RCLCPP_DEBUG(node_->get_logger(), "Couldnt compute transform: %d - 3d kpts %d %d - ratio %f - matches %d", reg_info.inliers,
+                          from.sensorData().keypoints3D().size(), to.sensorData().keypoints3D().size(), reg_info.inliersRatio, reg_info.matches);
       }
     }
-    if (generate_new_keyframe)
+    catch (std::exception &e)
     {
-      previous_keyframe_ = keyframe;
+      RCLCPP_WARN(
+          node_->get_logger(),
+          "Exception: Could not compute transformation for keyframe generation: %s -- from words %d words3 %d : to words %d words3 %d",
+          e.what(), from.getWords().size(), from.getWords3().size(), to.getWords().size(), to.getWords3().size());
     }
   }
-  // RCLCPP_WARN(
-  //   node_->get_logger(),
-  //   "Local transform: %s",
-  //    keyframe->stereoCameraModels()[0].localTransform().prettyPrint().c_str());
+
+  previous_keyframe_ = keyframe;
  
-  return generate_new_keyframe;
+  return true;
 }
 
 void RGBDHandler::process_new_sensor_data()
@@ -601,22 +590,22 @@ void RGBDHandler::receive_local_keyframe_match(
     lc->keyframe0_id = msg->keyframe0_id;
     lc->keyframe1_id = msg->keyframe1_id;
     
-    setMatches(from, to);
-    rtabmap::Transform t = intra_registration_.computeTransformation(
-      from, to, rtabmap::Transform(), &reg_info);
-    
-    if (!t.isNull())
-    {
-      lc->success = true;
-      auto fluFrame = CameraModel::opticalRotation() * t * CameraModel::opticalRotation().inverse();
-      //RCLCPP_INFO(node_->get_logger(), "Intra loop closure: %s", t.prettyPrint().c_str());
-      reg_info.covariance.reshape(1,1).copyTo(lc->pose.covariance);
-      rtabmap_conversions::transformToPoseMsg(fluFrame, lc->pose.pose);
+    bool hasMatches = setMatches(from, to);
+    lc->success = false;
+    if (hasMatches) {
+      rtabmap::Transform t = intra_registration_.computeTransformation(
+        from, to, rtabmap::Transform(), &reg_info);
+      
+      if (!t.isNull())
+      {
+        lc->success = true;
+        auto fluFrame = CameraModel::opticalRotation() * t * CameraModel::opticalRotation().inverse();
+        //RCLCPP_INFO(node_->get_logger(), "Intra loop closure: %s", t.prettyPrint().c_str());
+        reg_info.covariance.reshape(1,1).copyTo(lc->pose.covariance);
+        rtabmap_conversions::transformToPoseMsg(fluFrame, lc->pose.pose);
+      }
     }
-    else
-    {
-      lc->success = false;
-    }
+
     intra_robot_loop_closure_publisher_->publish(std::move(lc));
   }
   catch (std::exception &e)
@@ -668,32 +657,33 @@ void RGBDHandler::receive_local_image_descriptors(
         tmp_from = local_descriptors_map_.at(local_keyframe_id);
       }
       auto from = Signature(*tmp_from);
-      setMatches(from, to);
-      rtabmap::Transform t = inter_registration_.computeTransformation(
-        from, to, rtabmap::Transform(), &reg_info);
-      
+      bool hasMatches = setMatches(from, to);
       // Store using pairs (robot_id, keyframe_id)
       auto lc = std::make_unique<cslam_common_interfaces::msg::InterRobotLoopClosure>();
       lc->robot0_id = robot_id_;
       lc->robot0_keyframe_id = local_keyframe_id;
       lc->robot1_id = msg->robot_id;
       lc->robot1_keyframe_id = msg->keyframe_id;
-      if (!t.isNull())
-      {
-        lc->success = true;
-        auto fluFrame = CameraModel::opticalRotation() * t * CameraModel::opticalRotation().inverse();
-        reg_info.covariance.reshape(1,1).copyTo(lc->pose.covariance);
-        rtabmap_conversions::transformToPoseMsg(fluFrame, lc->pose.pose);
-        inter_robot_loop_closure_publisher_->publish(std::move(lc));
-      }
-      else
-      {
-        RCLCPP_INFO(
-            node_->get_logger(),
-            "Could not compute transformation between (%d,%d) and (%d,%d): %s",
-            robot_id_, local_keyframe_id, msg->robot_id, msg->keyframe_id,
-            reg_info.rejectedMsg.c_str());
-        lc->success = false;
+      lc->success = false;
+      if (hasMatches) {
+        rtabmap::Transform t = inter_registration_.computeTransformation(
+          from, to, rtabmap::Transform(), &reg_info);
+        
+        if (!t.isNull())
+        {
+          lc->success = true;
+          auto fluFrame = CameraModel::opticalRotation() * t * CameraModel::opticalRotation().inverse();
+          reg_info.covariance.reshape(1,1).copyTo(lc->pose.covariance);
+          rtabmap_conversions::transformToPoseMsg(fluFrame, lc->pose.pose);
+        }
+        else
+        {
+          RCLCPP_INFO(
+              node_->get_logger(),
+              "Could not compute transformation between (%d,%d) and (%d,%d): %s",
+              robot_id_, local_keyframe_id, msg->robot_id, msg->keyframe_id,
+              reg_info.rejectedMsg.c_str());
+        }
         inter_robot_loop_closure_publisher_->publish(std::move(lc));
       }
     }
