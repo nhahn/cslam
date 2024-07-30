@@ -69,7 +69,6 @@ def launch_setup(context, *args, **kwargs):
                                         "evaluation.rendezvous_schedule_file": LaunchConfiguration('rendezvous_schedule_file'),
                                     }
                                 ],
-                               prefix=['stdbuf -o L'],
                                output='screen',
                             #   prefix="pprofile -o cslam.pprofile",
                                

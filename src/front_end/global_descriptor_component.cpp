@@ -12,7 +12,7 @@
 #include <opencv2/cudaimgproc.hpp>
 #include <opencv2/cudawarping.hpp>
 #include "lightglue_onnx/GeoNetOnnxRunner.hpp"
-
+#include "lightglue_onnx/GeoNetTRT.hpp"
 
 using std::placeholders::_1;
 using namespace cv::cuda;
@@ -25,9 +25,17 @@ namespace cslam {
 
 	  GlobalDescriptorComponent(rclcpp::NodeOptions ops) : Node("global_descriptor_node", ops)
 	  {
-		declare_parameter<std::string>("frontend.cosplace.model", "/models/cosplace_model_resnet18.pth");
-
-		GlobalMatcher = std::make_shared<cslam::GeoNetOnnxRunner>(get_parameter("frontend.cosplace.model").as_string());
+		declare_parameter<std::string>("frontend.model", "/models/trt_engines/EigenplacesResNet50_128.engine");
+		std::filesystem::path model (get_parameter("frontend.model").as_string());
+		if (model.extension() == ".onnx") {
+			RCLCPP_INFO(get_logger(), "Initialized ONNX global descriptor node");
+			GlobalMatcher = std::make_shared<cslam::GeoNetOnnxRunner>(model);
+		} else if (model.extension() == ".engine") {
+			RCLCPP_INFO(get_logger(), "Initialized TRT global descriptor node");
+			GlobalMatcher = std::make_shared<cslam::GeoNetTRT>(model);
+		} else {
+			throw std::runtime_error("Invalid global descriptor model type");
+		}
 
 		global_descriptor_publisher = create_publisher<cslam_common_interfaces::msg::GlobalDescriptor>(
 		"cslam/processed_global_descriptor", 100);
@@ -37,10 +45,11 @@ namespace cslam {
 		"cslam/keyframe_data", 100,
 		std::bind(&GlobalDescriptorComponent::receive_keyframe, this,
 					std::placeholders::_1));
+		RCLCPP_INFO(get_logger(), "Initialized global descriptor node");
 	  };
 
 	  private:
-    	std::shared_ptr<cslam::GeoNetOnnxRunner> GlobalMatcher;
+    	std::shared_ptr<cslam::GlobalDescriptorRunner> GlobalMatcher;
 		std::vector<float> embedding{};
 		rclcpp::Subscription<
 			cslam_common_interfaces::msg::KeyframeRGB>::SharedPtr
