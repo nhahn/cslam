@@ -9,6 +9,7 @@ def read_image(path: str, grayscale: bool = False) -> np.ndarray:
     """Read an image from path as RGB or grayscale"""
     mode = cv2.IMREAD_GRAYSCALE if grayscale else cv2.IMREAD_COLOR
     image = cv2.imread(path, mode)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     if image is None:
         raise IOError(f"Could not read image at {path}.")
     if not grayscale:
@@ -24,6 +25,7 @@ def numpy_image_to_torch(image: np.ndarray) -> torch.Tensor:
         image = image[None]  # add channel axis
     else:
         raise ValueError(f"Not an image: {image.shape}")
+    print(f"First nums {image[0][0][0]} {image[0][0][1]} {image[0][0][2]}")
     return torch.tensor(image / 255.0, dtype=torch.float)
 
 

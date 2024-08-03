@@ -54,6 +54,7 @@ def launch_setup(context, *args, **kwargs):
                                    ],
                                    prefix="",#"xterm -e gdb -ex run --args", #LaunchConfiguration('launch_prefix_cslam'),# "gdbserver localhost:3000", # xterm -e gdb -ex run --args
                                    namespace=LaunchConfiguration('namespace'))
+                                  # arguments=['--ros-args','--log-level','debug'])
     
     global_descriptor_node = Node(
                                 package='cslam',

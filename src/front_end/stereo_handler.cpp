@@ -210,7 +210,7 @@ void StereoHandler::stereo_with_additional_callback(
       }
     }
 
-    auto ptrImageLeft = cv_bridge::toCvCopy(
+    auto ptrImageLeft = cv_bridge::toCvShare(
         image_rect_left, image_rect_left->encoding.compare(
                            sensor_msgs::image_encodings::TYPE_8UC1) == 0 ||
                                image_rect_left->encoding.compare(
@@ -220,7 +220,7 @@ void StereoHandler::stereo_with_additional_callback(
                              sensor_msgs::image_encodings::MONO16) != 0
                            ? "bgr8"
                            : "mono8");
-   auto ptrImageRight = cv_bridge::toCvCopy(
+   auto ptrImageRight = cv_bridge::toCvShare(
         image_rect_right, image_rect_right->encoding.compare(
                             sensor_msgs::image_encodings::TYPE_8UC1) == 0 ||
                                 image_rect_right->encoding.compare(
@@ -228,7 +228,7 @@ void StereoHandler::stereo_with_additional_callback(
                             ? ""
                             : "mono8");
     
-    auto ptrGlobal = cv_bridge::toCvCopy(global_image);
+    auto ptrGlobal = cv_bridge::toCvShare(global_image);
 
     RCLCPP_INFO(node_->get_logger(), "Stereo transform for cameras: %s", stereoModel.stereoTransform().prettyPrint().c_str());
     RCLCPP_INFO(node_->get_logger(), "TF for cameras: %s", stereoModel.localTransform().prettyPrint().c_str());

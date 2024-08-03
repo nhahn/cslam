@@ -49,7 +49,7 @@
 #include <rtabmap_conversions/MsgConversion.h>
 #include "cslam/front_end/sensor_handler_interface.h"
 #include "cslam/front_end/visualization_utils.h"
-#include "lightglue_onnx/LightGlueDecoupleOnnxRunner.hpp"
+#include "lightglue_onnx/LightGlueOnnxRunner.hpp"
 #include "lightglue_onnx/Configuration.hpp"
 
 namespace cslam
@@ -291,7 +291,7 @@ namespace cslam
 
     private:
         bool setMatches(rtabmap::Signature &from, rtabmap::Signature &to);
-        std::shared_ptr<lightglue::LightGlueDecoupleOnnxRunner> lightglueMatcher;
+        std::shared_ptr<lightglue::LightGlueOnnxRunner> lightglueMatcher;
         lightglue::Configuration lightglueConfig;
         rtabmap::ParametersMap rtabmap_parameters;
         image_transport::SubscriberFilter sub_image_color_;

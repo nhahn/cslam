@@ -39,7 +39,7 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
                        enable_visualization_);
   node_->get_parameter("visualization.publishing_period_ms",
                        visualization_period_ms_);
-  node_->declare_parameter("frontend.matcher_threshold", 0.8f);
+  node_->declare_parameter("frontend.matcher_threshold", 0.1f);
   node_->get_parameter("visualization.voxel_size",
                        visualization_voxel_size_);
   node_->get_parameter("visualization.max_range",
@@ -75,7 +75,7 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
   lightglueConfig.grayScale = true;
   lightglueConfig.matcherUseTrt = true;
   lightglueConfig.extractorUseTrt = true;
-  lightglueMatcher = std::make_shared<lightglue::LightGlueDecoupleOnnxRunner>();
+  lightglueMatcher = std::make_shared<lightglue::LightGlueOnnxRunner>();
   lightglueMatcher->InitOrtEnv(lightglueConfig);
   lightglueMatcher->SetMatchThresh(node_->get_parameter("frontend.matcher_threshold").as_double());
 
@@ -328,25 +328,29 @@ bool RGBDHandler::compute_local_descriptors(
             frame_data->depthRaw().rows, frame_data->depthRaw().cols);
     }
   }
-
-  auto extData = lightglueMatcher->Extractor(lightglueConfig, image);
-  std::vector<cv::Point3f> kpts3D = detector_->generateKeypoints3D(*frame_data, extData.first);
-  int valid3DKpts = 0;
-  for(int i = 0; i < kpts3D.size(); i++) {
-    if(rtabmap::util3d::isFinite(kpts3D[i])) {
-      valid3DKpts++;
+  try {
+    auto extData = lightglueMatcher->Extractor(lightglueConfig, image);
+    std::vector<cv::Point3f> kpts3D = detector_->generateKeypoints3D(*frame_data, extData.first);
+    int valid3DKpts = 0;
+    for(int i = 0; i < kpts3D.size(); i++) {
+      if(rtabmap::util3d::isFinite(kpts3D[i])) {
+        valid3DKpts++;
+      }
     }
+
+    if(valid3DKpts < min_3d_keypoints_){
+      RCLCPP_DEBUG(node_->get_logger(), "Rejecting keyframe due to the low number of 3D keypoints detected (%d/%d) - min ", valid3DKpts, extData.first.size(), min_3d_keypoints_);
+      return false;
+    }
+    //Reduce our descriptor size here for easier storage and transmission
+    cv::Mat fp16descriptors;
+    extData.second.convertTo(fp16descriptors, CV_16F);
+    //RCLCPP_INFO(node_->get_logger(), "Data about things %d %d %d", keypoints.size(), descriptors.rows, kpts3D.size());
+    frame_data->setFeatures(extData.first, kpts3D, fp16descriptors);
+  } catch (std::exception &e) {
+    RCLCPP_ERROR(node_->get_logger(),"Error extracting keypoints for keyframe %s", e.what());
   }
 
-  if(valid3DKpts < min_3d_keypoints_){
-    RCLCPP_DEBUG(node_->get_logger(), "Rejecting keyframe due to the low number of 3D keypoints detected (%d/%d) - min ", valid3DKpts, extData.first.size(), min_3d_keypoints_);
-    return false;
-  }
-  //Reduce our descriptor size here for easier storage and transmission
-  cv::Mat fp16descriptors;
-  extData.second.convertTo(fp16descriptors, CV_16F);
-  //RCLCPP_INFO(node_->get_logger(), "Data about things %d %d %d", keypoints.size(), descriptors.rows, kpts3D.size());
-  frame_data->setFeatures(extData.first, kpts3D, fp16descriptors);
   return true;
 }
 
@@ -356,30 +360,23 @@ bool RGBDHandler::setMatches(rtabmap::Signature &from, rtabmap::Signature &to) {
   const auto kptsFrom3D = from.sensorData().keypoints3D(), kptsTo3D = to.sensorData().keypoints3D();
   cv::Mat descriptorsFrom; from.sensorData().descriptors().convertTo(descriptorsFrom, CV_32F);
   cv::Mat descriptorsTo; to.sensorData().descriptors().convertTo(descriptorsTo, CV_32F);
-  std::list<int> fromWordIds;
-  std::list<int> toWordIds;
-  std::vector<int> fromWordIdsV(descriptorsFrom.rows);
-  std::vector<int> toWordIdsV(descriptorsTo.rows, 0);
-  for (int i = 0; i < descriptorsFrom.rows; ++i)
-  {
-    int id = i+1;
-    fromWordIds.push_back(id);
-    fromWordIdsV[i] = id;
-  }
 
   const auto fromModel = from.sensorData().stereoCameraModels().size() > 0? from.sensorData().stereoCameraModels()[0].left() : from.sensorData().cameraModels()[0];
   const auto toModel = to.sensorData().stereoCameraModels().size() > 0? to.sensorData().stereoCameraModels()[0].left() : to.sensorData().cameraModels()[0];
-
-  const std::vector<cv::Point2f> normFrom = NormKeypoints(kptsFrom, fromModel.imageHeight(), fromModel.imageWidth());
-  const std::vector<cv::Point2f> normTo = NormKeypoints(kptsTo, toModel.imageHeight(), toModel.imageWidth());
   
-  //RCLCPP_INFO(node_->get_logger(), "Maching: %d %d -- %d %d", kptsTo.size(), kptsFrom.size(), descriptorsTo.rows, descriptorsFrom.rows);
+  RCLCPP_DEBUG(node_->get_logger(), "Maching: %d %d -- %d %d", kptsTo.size(), kptsFrom.size(), descriptorsTo.rows, descriptorsFrom.rows);
 
-  auto matches = lightglueMatcher->MatcherIdx(lightglueConfig, normTo, normFrom, descriptorsTo, descriptorsFrom);
+  std::vector<cv::DMatch> matches;
+  try {
+    matches = lightglueMatcher->Matcher(lightglueConfig, kptsTo, kptsFrom, descriptorsTo, descriptorsFrom, toModel.imageSize(), fromModel.imageSize());
+  } catch (std::exception &e) {
+    RCLCPP_ERROR(node_->get_logger(),"Error matching KFs (%d,%d) - %s", from.id(), to.id(), e.what());
+  }
+
   //Query = TO keypoints, Train = FROM Keypoints
 
   if(matches.size() == 0) {
-    RCLCPP_INFO(node_->get_logger(), "Matching failed -- zero matches recieved");
+    RCLCPP_DEBUG(node_->get_logger(), "Matching failed -- zero matches recieved");
     return false;
   }
 
@@ -393,21 +390,21 @@ bool RGBDHandler::setMatches(rtabmap::Signature &from, rtabmap::Signature &to) {
 
   for(size_t i=0; i<matches.size(); ++i)
   {
-      auto matchId = matches[i].trainIdx;
-      auto toId = matches[i].queryIdx;
-      wordsFrom.insert(wordsFrom.end(), std::make_pair(i, wordsFrom.size()));
-      wordsKptsFrom.push_back(kptsFrom[matchId]);
-      words3From.push_back(kptsFrom3D[matchId]);
+    auto matchId = matches[i].trainIdx;
+    auto toId = matches[i].queryIdx;
+    wordsFrom.insert(wordsFrom.end(), std::make_pair(i, wordsFrom.size()));
+    wordsKptsFrom.push_back(kptsFrom[matchId]);
+    words3From.push_back(kptsFrom3D[matchId]);
 
-      wordsTo.insert(wordsTo.end(), std::make_pair(i, wordsTo.size()));
-      wordsKptsTo.push_back(kptsTo[toId]);
-      if(!kptsTo3D.empty())
-      {
-        words3To.push_back(kptsTo3D[toId]);
-      }
-      // if (i > 5 && i < 11) {
-      //   RCLCPP_INFO(node_->get_logger(), "Example matches  - %d -> %d : %f - %f", matchId, toId, kptsFrom[matchId].pt.x, kptsTo[toId].pt.x);
-      // }
+    wordsTo.insert(wordsTo.end(), std::make_pair(i, wordsTo.size()));
+    wordsKptsTo.push_back(kptsTo[toId]);
+    if(!kptsTo3D.empty())
+    {
+      words3To.push_back(kptsTo3D[toId]);
+    }
+    // if (i > 5 && i < 11) {
+    //   RCLCPP_INFO(node_->get_logger(), "Example matches  - %d -> %d : %f - %f", matchId, toId, kptsFrom[matchId].pt.x, kptsTo[toId].pt.x);
+    // }
 
   }
 
@@ -424,7 +421,7 @@ bool RGBDHandler::generate_new_keyframe(std::shared_ptr<rtabmap::SensorData> &ke
 
   if (nb_local_keyframes_ > 0)
   {
-    auto from = Signature(*previous_keyframe_), to = Signature(*keyframe);
+    auto from = Signature(*keyframe), to = Signature(*previous_keyframe_);
     bool hasMaches = setMatches(from, to);
     if (!hasMaches)
       return true;
@@ -594,7 +591,7 @@ void RGBDHandler::receive_local_keyframe_match(
     lc->success = false;
     if (hasMatches) {
       rtabmap::Transform t = intra_registration_.computeTransformation(
-        from, to, rtabmap::Transform(), &reg_info);
+        to, from, rtabmap::Transform(), &reg_info);
       
       if (!t.isNull())
       {
@@ -604,6 +601,14 @@ void RGBDHandler::receive_local_keyframe_match(
         reg_info.covariance.reshape(1,1).copyTo(lc->pose.covariance);
         rtabmap_conversions::transformToPoseMsg(fluFrame, lc->pose.pose);
       }
+       else
+        {
+          RCLCPP_DEBUG(
+              node_->get_logger(),
+              "Could not compute transformation between (%d,%d) : %s",
+              lc->keyframe0_id, lc->keyframe1_id,
+              reg_info.rejectedMsg.c_str());
+        }
     }
 
     intra_robot_loop_closure_publisher_->publish(std::move(lc));

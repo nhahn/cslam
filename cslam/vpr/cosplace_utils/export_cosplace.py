@@ -1,4 +1,3 @@
-
 import torch
 import torchvision.transforms.functional
 
@@ -15,28 +14,29 @@ from onnxruntime.tools.symbolic_shape_infer import SymbolicShapeInference
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
         
-transforms = torch.nn.Sequential(
-    T.Grayscale(3),
-    T.Resize((224, 224), interpolation=3),
-    T.Normalize(IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD)
-)    
+# transforms = torch.nn.Sequential(
+#     #T.Grayscale(3),
+#     T.Resize((224, 224), interpolation=3),
+#     T.Normalize(IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD)
+# )    
     
 @torch.jit.script
 def transform(x: torch.Tensor):
     cropsize = min(x.shape[1], x.shape[2])
     x = T.functional.center_crop(x, (cropsize, cropsize))
-    return transforms(x)
+    x = T.functional.resize(x, (224, 224), interpolation=3)
+    x = x.permute(1, 2, 0)
+    return x
 
-# class NetEmbedding(torch.nn.Module):
-#     def __init__(self, model):
-#         super().__init__()
-#         self.model = model
+class NetEmbedding(torch.nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
         
-#     def forward(self, x: torch.Tensor):
-#         x = x.permute(2, 0, 1)
-#         x = T.functional.normalize(x,IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD)
-#         x = torch.unsqueeze(x, 0)
-#         return self.model.forward(x)
+    def forward(self, x: torch.Tensor):
+        x = x.permute(2, 0, 1)
+        x = T.functional.normalize(x,IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD)[None]
+        return self.model(x)#.detach().cpu()
 
 
 def parse_args() -> argparse.Namespace:
@@ -87,36 +87,42 @@ def export_cosplace(
         output_path = f"weights/{version}{backbone}_{dims}.onnx"
 
     model = get_trained_model(backbone, dims, version).eval()
-    # module = NetEmbedding(model).eval()
+    module = NetEmbedding(model).eval()
     
     image, scale = load_image("DSC_0410.JPG")
+    print(f"First nums {image[0][0][0]} {image[0][0][1]} {image[0][0][2]}")
     image2, scale = load_image("DSC_0411.JPG")
-    image = transform(image)[None]
-    image2 = transform(image2)[None]
-    # print(module.forward(image))
-    exampleInput = torch.randn(1, 3, 224, 224, dtype=torch.float32)
+    image = transform(image)
+    image2 = transform(image2)
+    print(module(image))
+    exampleInput = torch.randn(224, 224, 3, dtype=torch.float32)
     torch.onnx.export(
-        model,
+        module,
         exampleInput,
         output_path,
-        opset_version=20,
+        opset_version=17,
         input_names=["image"],
         output_names=[
             "embedding"
         ],
     )
-    print(model(image))
-    print(model(image2))
-    
-    print(validate_onnx_model(output_path, {"image": image2}, model(image2), False, False))
-    print(validate_onnx_model(output_path, {"image": image}, model(image), False, False))
+    print(torch.cosine_similarity(module(image), module(image2)))
 
-    test_session = create_onnxruntime_session(output_path, False, enable_all_optimization=False)
+    imag3, scale = load_image("sacre_coeur1.jpg")
+    image4, scale = load_image("sacre_coeur2.jpg")
+    imag3 = transform(imag3)
+    image4 = transform(image4)
+    print(torch.cosine_similarity(module(imag3), module(image4)))
+
+    print(validate_onnx_model(output_path, {"image": image2}, module(image2), False, False))
+    print(validate_onnx_model(output_path, {"image": image}, module(image), False, False))
+
+    # test_session = create_onnxruntime_session(output_path, False, enable_all_optimization=False)
 
     # Compare the inference result with PyTorch or Tensorflow
-    example_ort_inputs = {k: t.numpy() for k, t in {"image": image2}.items()}
-    example_ort_outputs = test_session.run(None, example_ort_inputs)
-    print(example_ort_outputs)
+    # example_ort_inputs = {k: t.numpy() for k, t in {"image": image2}.items()}
+    # example_ort_outputs = test_session.run(None, example_ort_inputs)
+    # print(example_ort_outputs)
     # onnxmodel = load_model(output_path)
     # save_model(
     #     SymbolicShapeInference.infer_shapes(onnxmodel, auto_merge=True),
