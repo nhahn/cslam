@@ -25,12 +25,16 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
   node_->declare_parameter<std::string>("frontend.depth_image_topic", "depth/image");
   node_->declare_parameter<std::string>("frontend.color_camera_info_topic",
                                         "color/camera_info");
-  node_->declare_parameter<std::string>("frontend.superpoint_model", "/models/superpoint_1536.onnx");
-  node_->declare_parameter<std::string>("frontend.lightglue_model", "/models/superpoint_lightglue_fused_fp16.onnx");
+  node_->declare_parameter<std::string>("frontend.superpoint_model", "/models/superpoint_1024.onnx");
+  node_->declare_parameter<std::string>("frontend.lightglue_model", "/models/superpoint_lightglue_1024.onnx");
   node_->declare_parameter<std::string>("frontend.odom_topic", "odom");
   node_->declare_parameter<float>("frontend.keyframe_generation_ratio_threshold", 0.0);
   node_->declare_parameter<std::string>("frontend.sensor_base_frame_id", ""); // If empty we assume that the camera link is the base link
   node_->declare_parameter<bool>("evaluation.enable_logs", false);
+    // Parameters
+  node_->get_parameter("frontend.inter_pnp_min_inliers", min_inliers_);
+  node_->get_parameter("max_nb_robots", max_nb_robots_);
+  node_->get_parameter("robot_id", robot_id_);
   node_->get_parameter("frontend.max_queue_size", max_queue_size_);
   node_->get_parameter("frontend.min_3d_keypoints", min_3d_keypoints_);
   node_->get_parameter("frontend.keyframe_generation_ratio_threshold", keyframe_generation_ratio_threshold_);
@@ -79,22 +83,12 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
   lightglueMatcher->InitOrtEnv(lightglueConfig);
   lightglueMatcher->SetMatchThresh(node_->get_parameter("frontend.matcher_threshold").as_double());
 
-  if (keyframe_generation_ratio_threshold_ > 0.99)
-  {
-    generate_new_keyframes_based_on_inliers_ratio_ = false;
-  }
-  else
-  {
-    generate_new_keyframes_based_on_inliers_ratio_ = true;
-  }
-
   nb_local_keyframes_ = 0;
+  auto qos = rclcpp::SensorDataQoS().get_rmw_qos_profile();
 
   sub_odometry_.subscribe(node_,
                           node_->get_parameter("frontend.odom_topic").as_string(),
-                          rclcpp::QoS(max_queue_size_)
-                              .reliability((rmw_qos_reliability_policy_t)2)
-                              .get_rmw_qos_profile());
+                          qos);
 
   // Service to extract and publish local image descriptors to another robot
   rclcpp::SubscriptionOptions descriptorOptions;
@@ -106,11 +100,6 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
       std::bind(&RGBDHandler::local_descriptors_request, this,
                 std::placeholders::_1), descriptorOptions);
 
-  // Parameters
-  node_->get_parameter("frontend.max_queue_size", max_queue_size_);
-  node_->get_parameter("frontend.inter_pnp_min_inliers", min_inliers_);
-  node_->get_parameter("max_nb_robots", max_nb_robots_);
-  node_->get_parameter("robot_id", robot_id_);
 
   // Publisher for global descriptors
   keyframe_data_publisher_ =
@@ -180,27 +169,20 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
   // Subscriber for RGBD images
   sub_image_color_.subscribe(
       node_, node_->get_parameter("frontend.color_image_topic").as_string(), "raw",
-      rclcpp::QoS(max_queue_size_)
-          .reliability((rmw_qos_reliability_policy_t)2)
-          .get_rmw_qos_profile());
+      qos);
   sub_image_depth_.subscribe(
       node_, node_->get_parameter("frontend.depth_image_topic").as_string(), "raw",
-      rclcpp::QoS(max_queue_size_)
-          .reliability((rmw_qos_reliability_policy_t)2)
-          .get_rmw_qos_profile());
+      qos);
   sub_camera_info_color_.subscribe(
       node_, node_->get_parameter("frontend.color_camera_info_topic").as_string(),
-      rclcpp::QoS(max_queue_size_)
-          .reliability((rmw_qos_reliability_policy_t)2)
-          .get_rmw_qos_profile());
-
-  rgbd_sync_policy_ = new message_filters::Synchronizer<RGBDSyncPolicy>(
+       qos);
+  odom_queue_ = std::make_unique<message_filters::Cache<nav_msgs::msg::Odometry>>(sub_odometry_, max_queue_size_);
+  rgbd_synchronizer = std::make_unique<message_filters::Synchronizer<RGBDSyncPolicy>>(
       RGBDSyncPolicy(max_queue_size_), sub_image_color_, sub_image_depth_,
-      sub_camera_info_color_, sub_odometry_);
-  rgbd_sync_policy_->registerCallback(
+      sub_camera_info_color_);
+  rgbd_synchronizer->registerCallback(
       std::bind(&RGBDHandler::rgbd_callback, this, std::placeholders::_1,
-                std::placeholders::_2, std::placeholders::_3,
-                std::placeholders::_4));
+                std::placeholders::_2, std::placeholders::_3));
 
   if (enable_gps_recording_)
   {
@@ -220,15 +202,14 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
 void RGBDHandler::rgbd_callback(
     const sensor_msgs::msg::Image::ConstSharedPtr image_rect_rgb,
     const sensor_msgs::msg::Image::ConstSharedPtr image_rect_depth,
-    const sensor_msgs::msg::CameraInfo::ConstSharedPtr camera_info_rgb,
-    const nav_msgs::msg::Odometry::ConstSharedPtr odom)
+    const sensor_msgs::msg::CameraInfo::ConstSharedPtr camera_info_rgb)
 {
-  // If odom tracking failed, do not process the frame
-  if (odom->pose.covariance[0] > 1000)
-  {
-    RCLCPP_WARN(node_->get_logger(), "Odom tracking failed, skipping frame");
-    return;
-  }
+  // // If odom tracking failed, do not process the frame
+  // if (odom->pose.covariance[0] > 1000)
+  // {
+  //   RCLCPP_WARN(node_->get_logger(), "Odom tracking failed, skipping frame");
+  //   return;
+  // }
 
   if (!(image_rect_rgb->encoding.compare(sensor_msgs::image_encodings::TYPE_8UC1) == 0 ||
         image_rect_rgb->encoding.compare(sensor_msgs::image_encodings::MONO8) == 0 ||
@@ -251,8 +232,8 @@ void RGBDHandler::rgbd_callback(
 
   rclcpp::Time stamp = rtabmap_conversions::timestampFromROS(image_rect_rgb->header.stamp) > rtabmap_conversions::timestampFromROS(image_rect_depth->header.stamp) ? image_rect_rgb->header.stamp : image_rect_depth->header.stamp;
 
-  cv_bridge::CvImageConstPtr ptr_image = cv_bridge::toCvShare(image_rect_rgb);
-  cv_bridge::CvImageConstPtr ptr_depth = cv_bridge::toCvShare(image_rect_depth);
+  cv_bridge::CvImageConstPtr ptr_image = cv_bridge::toCvCopy(image_rect_rgb);
+  cv_bridge::CvImageConstPtr ptr_depth = cv_bridge::toCvCopy(image_rect_depth);
 
   CameraModel camera_model = rtabmap_conversions::cameraModelFromROS(*camera_info_rgb);
 
@@ -263,15 +244,10 @@ void RGBDHandler::rgbd_callback(
       rtabmap_conversions::timestampFromROS(stamp));
   
 
-  received_data_queue_.push_back(std::make_pair(data, odom));
-  if (received_data_queue_.size() > max_queue_size_)
-  {
+  received_imagery_queue_.push_back(data);
+  if (received_imagery_queue_.size() > max_queue_size_) {
     // Remove the oldest keyframes if we exceed the maximum size
-    received_data_queue_.pop_front();
-    RCLCPP_WARN(
-        node_->get_logger(),
-        "RGBD: Maximum queue size (%d) exceeded, the oldest element was removed.",
-        max_queue_size_);
+    received_imagery_queue_.pop_front();
   }
 
   if (enable_gps_recording_) {
@@ -281,23 +257,6 @@ void RGBDHandler::rgbd_callback(
       received_gps_queue_.pop_front();
     }
   }
-}
-
-std::vector<cv::Point2f> NormKeypoints(std::vector<cv::KeyPoint> kpts, int h, int w)
-{
-    cv::Size size(w, h);
-    cv::Point2f shift(static_cast<float>(w) / 2, static_cast<float>(h) / 2);
-    float scale = static_cast<float>((std::max)(w, h)) / 2;
-
-    std::vector<cv::Point2f> normalizedKpts;
-    normalizedKpts.reserve(kpts.size());
-    for (const cv::KeyPoint &kpt : kpts)
-    {
-        cv::Point2f normalizedKpt = (kpt.pt - shift) / scale;
-        normalizedKpts.push_back(normalizedKpt);
-    }
-
-    return normalizedKpts;
 }
 
 bool RGBDHandler::compute_local_descriptors(
@@ -355,71 +314,109 @@ bool RGBDHandler::compute_local_descriptors(
 }
 
 bool RGBDHandler::setMatches(rtabmap::Signature &from, rtabmap::Signature &to) {
-  
   const auto kptsFrom = from.sensorData().keypoints(), kptsTo = to.sensorData().keypoints();
   const auto kptsFrom3D = from.sensorData().keypoints3D(), kptsTo3D = to.sensorData().keypoints3D();
   cv::Mat descriptorsFrom; from.sensorData().descriptors().convertTo(descriptorsFrom, CV_32F);
   cv::Mat descriptorsTo; to.sensorData().descriptors().convertTo(descriptorsTo, CV_32F);
-
   const auto fromModel = from.sensorData().stereoCameraModels().size() > 0? from.sensorData().stereoCameraModels()[0].left() : from.sensorData().cameraModels()[0];
   const auto toModel = to.sensorData().stereoCameraModels().size() > 0? to.sensorData().stereoCameraModels()[0].left() : to.sensorData().cameraModels()[0];
-  
-  RCLCPP_DEBUG(node_->get_logger(), "Maching: %d %d -- %d %d", kptsTo.size(), kptsFrom.size(), descriptorsTo.rows, descriptorsFrom.rows);
+
+  std::list<int> fromWordIds;
+  std::list<int> toWordIds;
+  std::vector<int> fromWordIdsV(descriptorsFrom.rows);
+  std::vector<int> toWordIdsV(descriptorsTo.rows, 0);
+  for (int i = 0; i < descriptorsFrom.rows; ++i)
+  {
+    int id = i+1;
+    fromWordIds.push_back(id);
+    fromWordIdsV[i] = id;
+  }
+  //RCLCPP_DEBUG(node_->get_logger(), "Maching: %d %d -- %d %d", kptsTo.size(), kptsFrom.size(), descriptorsTo.rows, descriptorsFrom.rows);
 
   std::vector<cv::DMatch> matches;
   try {
+    //Query = TO keypoints, Train = FROM Keypoints
     matches = lightglueMatcher->Matcher(lightglueConfig, kptsTo, kptsFrom, descriptorsTo, descriptorsFrom, toModel.imageSize(), fromModel.imageSize());
   } catch (std::exception &e) {
     RCLCPP_ERROR(node_->get_logger(),"Error matching KFs (%d,%d) - %s", from.id(), to.id(), e.what());
   }
-
-  //Query = TO keypoints, Train = FROM Keypoints
-
+  
   if(matches.size() == 0) {
-    RCLCPP_DEBUG(node_->get_logger(), "Matching failed -- zero matches recieved");
     return false;
   }
-
-  std::multimap<int, int> wordsFrom;
-  std::multimap<int, int> wordsTo;
-  std::vector<cv::KeyPoint> wordsKptsFrom;
-  std::vector<cv::KeyPoint> wordsKptsTo;
-  std::vector<cv::Point3f> words3From;
-  std::vector<cv::Point3f> words3To;
-
-
   for(size_t i=0; i<matches.size(); ++i)
   {
-    auto matchId = matches[i].trainIdx;
-    auto toId = matches[i].queryIdx;
-    wordsFrom.insert(wordsFrom.end(), std::make_pair(i, wordsFrom.size()));
-    wordsKptsFrom.push_back(kptsFrom[matchId]);
-    words3From.push_back(kptsFrom3D[matchId]);
-
-    wordsTo.insert(wordsTo.end(), std::make_pair(i, wordsTo.size()));
-    wordsKptsTo.push_back(kptsTo[toId]);
-    if(!kptsTo3D.empty())
-    {
-      words3To.push_back(kptsTo3D[toId]);
-    }
-    // if (i > 5 && i < 11) {
-    //   RCLCPP_INFO(node_->get_logger(), "Example matches  - %d -> %d : %f - %f", matchId, toId, kptsFrom[matchId].pt.x, kptsTo[toId].pt.x);
-    // }
-
+      toWordIdsV[matches[i].queryIdx] = fromWordIdsV[matches[i].trainIdx];
   }
+  for(size_t i=0; i<toWordIdsV.size(); ++i)
+  {
+      int toId = toWordIdsV[i];
+      if(toId==0)
+      {
+          toId = fromWordIds.back()+i+1;
+      }
+      toWordIds.push_back(toId);
+    }
+    std::multiset<int> fromWordIdsSet(fromWordIds.begin(), fromWordIds.end());
+    std::multiset<int> toWordIdsSet(toWordIds.begin(), toWordIds.end());
 
-  from.setWords(wordsFrom, wordsKptsFrom, words3From, cv::Mat());
-  to.setWords(wordsTo, wordsKptsTo, words3To, cv::Mat());
-  return true;
+    std::multimap<int, int> wordsFrom;
+    std::multimap<int, int> wordsTo;
+    std::vector<cv::KeyPoint> wordsKptsFrom;
+    std::vector<cv::KeyPoint> wordsKptsTo;
+    std::vector<cv::Point3f> words3From;
+    std::vector<cv::Point3f> words3To;
+
+    int i=0;
+    UASSERT(kptsFrom3D.empty() || fromWordIds.size() == kptsFrom3D.size());
+    UASSERT(int(fromWordIds.size()) == descriptorsFrom.rows);
+    for(std::list<int>::iterator iter=fromWordIds.begin(); iter!=fromWordIds.end(); ++iter)
+    {
+        if(fromWordIdsSet.count(*iter) == 1)
+        {
+          wordsFrom.insert(wordsFrom.end(), std::make_pair(*iter, wordsFrom.size()));
+          if (!kptsFrom.empty())
+          {
+              wordsKptsFrom.push_back(kptsFrom[i]);
+          }
+          if(!kptsFrom3D.empty())
+          {
+              words3From.push_back(kptsFrom3D[i]);
+          }
+        }
+        ++i;
+    }
+    UASSERT(kptsTo3D.size() == 0 || kptsTo3D.size() == kptsTo.size());
+    UASSERT(toWordIds.size() == kptsTo.size());
+    UASSERT(int(toWordIds.size()) == descriptorsTo.rows);
+
+    i=0;
+    for(std::list<int>::iterator iter=toWordIds.begin(); iter!=toWordIds.end(); ++iter)
+    {
+      if(toWordIdsSet.count(*iter) == 1)
+      {
+          wordsTo.insert(wordsTo.end(), std::make_pair(*iter, wordsTo.size()));
+          wordsKptsTo.push_back(kptsTo[i]);
+          if(!kptsTo3D.empty())
+          {
+              words3To.push_back(kptsTo3D[i]);
+          }
+      }
+      ++i;
+    }
+
+    from.setWords(wordsFrom, wordsKptsFrom, words3From, cv::Mat());
+    to.setWords(wordsTo, wordsKptsTo, words3To, cv::Mat());
+    return true;
 }
 
 bool RGBDHandler::generate_new_keyframe(std::shared_ptr<rtabmap::SensorData> &keyframe)
 {
   // Keyframe generation heuristic
-  if (!generate_new_keyframes_based_on_inliers_ratio_)
+  if (keyframe_generation_ratio_threshold_ > 0.99f || keyframe_generation_ratio_threshold_ < 0.001f)
     return true;
 
-  if (nb_local_keyframes_ > 0)
+  if (nb_local_keyframes_ > 0 && previous_keyframe_)
   {
     auto from = Signature(*keyframe), to = Signature(*previous_keyframe_);
     bool hasMaches = setMatches(from, to);
@@ -434,15 +431,15 @@ bool RGBDHandler::generate_new_keyframe(std::shared_ptr<rtabmap::SensorData> &ke
       
       if (!t.isNull())
       {
-        if (float(reg_info.inliers) >
-            keyframe_generation_ratio_threshold_ *
-                float(previous_keyframe_->keypoints().size()))
+        if (reg_info.inliersRatio > keyframe_generation_ratio_threshold_ )
         {
+          RCLCPP_DEBUG(node_->get_logger(), "New KF not generated due to high number of inliers from pervious KF %d %f", reg_info.inliers,
+                          reg_info.inliersRatio);
           return false;
         }
+        RCLCPP_DEBUG(node_->get_logger(), "New KF generated - %d %f", reg_info.inliers, reg_info.inliersRatio);
       } else {
-        RCLCPP_DEBUG(node_->get_logger(), "Couldnt compute transform: %d - 3d kpts %d %d - ratio %f - matches %d", reg_info.inliers,
-                          from.sensorData().keypoints3D().size(), to.sensorData().keypoints3D().size(), reg_info.inliersRatio, reg_info.matches);
+        RCLCPP_DEBUG(node_->get_logger(), "Couldnt compute transform: inliers %d - ratio %f - matches %d", reg_info.inliers, reg_info.inliersRatio, reg_info.matches);
       }
     }
     catch (std::exception &e)
@@ -453,25 +450,41 @@ bool RGBDHandler::generate_new_keyframe(std::shared_ptr<rtabmap::SensorData> &ke
           e.what(), from.getWords().size(), from.getWords3().size(), to.getWords().size(), to.getWords3().size());
     }
   }
-
-  previous_keyframe_ = keyframe;
  
   return true;
 }
 
 void RGBDHandler::process_new_sensor_data()
 {
-if (!received_data_queue_.empty())
+  if (!received_imagery_queue_.empty())
   {
-    auto sensor_data = received_data_queue_.front();
-    received_data_queue_.pop_front();
+    //Get the most recent item in the queue
+    auto sensor_data = received_imagery_queue_.back();
+    received_imagery_queue_.pop_back();
+    int32_t sec = (int32_t)floor(sensor_data->stamp());
+    auto stamp = rclcpp::Time(sec, (uint32_t)std::round((sensor_data->stamp()-sec) * 1e9), odom_queue_->getOldestTime().get_clock_type());
+
+    auto odom = odom_queue_->getElemBeforeTime(stamp);
+    if (!odom)
+      return;
+
+    auto odom_time = rtabmap_conversions::timestampFromROS(odom->header.stamp);
+
+    //Do the best to align the odom with imagery
+    auto diff = abs(sensor_data->stamp() - odom_time);
+    while (!received_imagery_queue_.empty()) {
+      auto new_diff = abs(received_imagery_queue_.back()->stamp() - odom_time);
+      if(new_diff > diff)
+        break;
+      diff = new_diff; sensor_data = received_imagery_queue_.back();
+      received_imagery_queue_.pop_back();
+    }
 
     sensor_msgs::msg::NavSatFix gps_fix;
     if (enable_gps_recording_) {
-      gps_fix = received_gps_queue_.front();
-      received_gps_queue_.pop_front();
+      gps_fix = received_gps_queue_.back();
+      received_gps_queue_.pop_back();
     }
-
     if(base_frame_id_.length() > 0) {
       if(!hasTransform_) {
           geometry_msgs::msg::TransformStamped t;
@@ -480,47 +493,42 @@ if (!received_data_queue_.empty())
           // and send velocity commands for turtle2 to reach target_frame
           try {
             t = tf_buffer_->lookupTransform(
-              sensor_data.second->child_frame_id, base_frame_id_, 
-              sensor_data.second->header.stamp);
+              odom->child_frame_id, base_frame_id_, 
+              odom->header.stamp);
               
             tf2::fromMsg(t.transform, base_transform_);
             hasTransform_ = true;
           } catch (const tf2::TransformException & ex) {
             RCLCPP_INFO(
               node_->get_logger(), "Could not transform %s to %s: %s",
-              sensor_data.second->child_frame_id.c_str(), base_frame_id_.c_str(), ex.what());
+              odom->child_frame_id.c_str(), base_frame_id_.c_str(), ex.what());
           }
       }
     }
 
 
-    if (sensor_data.first->isValid())
+    if (sensor_data->isValid())
     {
-      // Compute local descriptors
-      bool generate_keyframe = compute_local_descriptors(sensor_data.first) //See if we have good keypoints
-                            && generate_new_keyframe(sensor_data.first); //Then check for overlap wtih the previous frame
-      if (generate_keyframe)
+      // Compute local descriptors 
+      if(compute_local_descriptors(sensor_data) && generate_new_keyframe(sensor_data)) //Then check for overlap wtih the previous frame
       {
         // Set keyframe ID
-        sensor_data.first->setId(nb_local_keyframes_);
+        sensor_data->setId(nb_local_keyframes_);
         nb_local_keyframes_++;
 
         if (enable_gps_recording_) {
-          send_keyframe(sensor_data, &gps_fix);
+          send_keyframe(std::make_pair(sensor_data, odom), &gps_fix);
         } else {
           // Send keyframe for loop detection
-          send_keyframe(sensor_data);
+          send_keyframe(std::make_pair(sensor_data, odom));
         }
-      }
-
-      clear_sensor_data(sensor_data.first);
-
-      if (generate_keyframe)
-      {
 
         const std::lock_guard<std::mutex> lock(map_mutex);
-        local_descriptors_map_.insert({sensor_data.first->id(), sensor_data.first});
+        local_descriptors_map_.insert({sensor_data->id(), sensor_data});
+        previous_keyframe_ = sensor_data;
       }
+
+      clear_sensor_data(sensor_data);
     }
   }
 
@@ -597,18 +605,18 @@ void RGBDHandler::receive_local_keyframe_match(
       {
         lc->success = true;
         auto fluFrame = CameraModel::opticalRotation() * t * CameraModel::opticalRotation().inverse();
-        //RCLCPP_INFO(node_->get_logger(), "Intra loop closure: %s", t.prettyPrint().c_str());
+        RCLCPP_DEBUG(node_->get_logger(), "Intra loop closure: %s", t.prettyPrint().c_str());
         reg_info.covariance.reshape(1,1).copyTo(lc->pose.covariance);
         rtabmap_conversions::transformToPoseMsg(fluFrame, lc->pose.pose);
       }
-       else
-        {
-          RCLCPP_DEBUG(
-              node_->get_logger(),
-              "Could not compute transformation between (%d,%d) : %s",
-              lc->keyframe0_id, lc->keyframe1_id,
-              reg_info.rejectedMsg.c_str());
-        }
+      else
+      {
+        RCLCPP_DEBUG(
+            node_->get_logger(),
+            "Intra-robot loop closure failed - could not compute transformation between (%d,%d) : %s",
+            lc->keyframe0_id, lc->keyframe1_id,
+            reg_info.rejectedMsg.c_str());
+      }
     }
 
     intra_robot_loop_closure_publisher_->publish(std::move(lc));
@@ -683,9 +691,9 @@ void RGBDHandler::receive_local_image_descriptors(
         }
         else
         {
-          RCLCPP_INFO(
+          RCLCPP_DEBUG(
               node_->get_logger(),
-              "Could not compute transformation between (%d,%d) and (%d,%d): %s",
+              "Inter-robot loop closure failed between (%d,%d) and (%d,%d): %s",
               robot_id_, local_keyframe_id, msg->robot_id, msg->keyframe_id,
               reg_info.rejectedMsg.c_str());
         }

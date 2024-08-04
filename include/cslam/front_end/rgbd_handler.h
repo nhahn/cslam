@@ -19,6 +19,7 @@
 #include <message_filters/sync_policies/approximate_time.h>
 #include <message_filters/synchronizer.h>
 #include <message_filters/time_synchronizer.h>
+#include <message_filters/cache.h>
 
 #include <image_transport/image_transport.hpp>
 #include <image_transport/subscriber_filter.hpp>
@@ -181,8 +182,7 @@ namespace cslam
         void rgbd_callback(
             const sensor_msgs::msg::Image::ConstSharedPtr image_rect_rgb,
             const sensor_msgs::msg::Image::ConstSharedPtr image_rect_depth,
-            const sensor_msgs::msg::CameraInfo::ConstSharedPtr camera_info_rgb,
-            const nav_msgs::msg::Odometry::ConstSharedPtr odom);
+            const sensor_msgs::msg::CameraInfo::ConstSharedPtr camera_info_rgb);
 
         /**
          * @brief Clear images and large data fields in sensor data
@@ -208,10 +208,7 @@ namespace cslam
                         const sensor_msgs::msg::PointCloud2 &input_cloud);
 
     protected:
-        std::deque<std::pair<std::shared_ptr<rtabmap::SensorData>,
-                             nav_msgs::msg::Odometry::ConstSharedPtr>>
-            received_data_queue_;
-
+        std::deque<std::shared_ptr<rtabmap::SensorData>> received_imagery_queue_;
         std::shared_ptr<rtabmap::SensorData> previous_keyframe_;
 
         std::map<int, std::shared_ptr<rtabmap::SensorData>> local_descriptors_map_;
@@ -221,6 +218,7 @@ namespace cslam
         unsigned int min_inliers_, max_nb_robots_, robot_id_, max_queue_size_,
             nb_local_keyframes_;
 
+        std::unique_ptr<message_filters::Cache<nav_msgs::msg::Odometry>> odom_queue_;
         message_filters::Subscriber<nav_msgs::msg::Odometry> sub_odometry_;
 
         rclcpp::Subscription<
@@ -273,7 +271,6 @@ namespace cslam
         std::string base_frame_id_;
         float keyframe_generation_ratio_threshold_;
         int min_3d_keypoints_;
-        bool generate_new_keyframes_based_on_inliers_ratio_;
 
         unsigned int visualization_period_ms_;
         bool enable_visualization_;
@@ -298,12 +295,11 @@ namespace cslam
         message_filters::Subscriber<sensor_msgs::msg::CameraInfo> sub_camera_info_color_;
         image_transport::SubscriberFilter sub_image_depth_;
         message_filters::Subscriber<sensor_msgs::msg::CameraInfo> sub_camera_info_depth_;
-        typedef message_filters::sync_policies::ApproximateTime<
+        typedef message_filters::sync_policies::ExactTime<
             sensor_msgs::msg::Image, sensor_msgs::msg::Image,
-            sensor_msgs::msg::CameraInfo,
-            nav_msgs::msg::Odometry>
+            sensor_msgs::msg::CameraInfo>
             RGBDSyncPolicy;
-        message_filters::Synchronizer<RGBDSyncPolicy> *rgbd_sync_policy_;
+        std::unique_ptr<message_filters::Synchronizer<RGBDSyncPolicy>> rgbd_synchronizer;
 
         sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_;
         std::mutex map_mutex, prev_frame_mutex;

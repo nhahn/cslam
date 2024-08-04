@@ -22,7 +22,8 @@ def launch_setup(context, *args, **kwargs):
                                    }
                                ],
                             #    prefix=['stdbuf -o L'],
-                            #    output='screen',
+                               # arguments=['--ros-args','--log-level','debug','--log-level','rcl:=INFO'],
+                               output='screen',
                                namespace=LaunchConfiguration('namespace'))
 
     map_manager_node = Node(package='cslam',
@@ -37,6 +38,7 @@ def launch_setup(context, *args, **kwargs):
                                 }
                             ],
                             output='screen',
+                            # arguments=['--ros-args','--log-level','debug','--log-level','rcl:=INFO'],
                             namespace=LaunchConfiguration('namespace'))
 
     pose_graph_manager_node = Node(package='cslam',
@@ -52,9 +54,10 @@ def launch_setup(context, *args, **kwargs):
                                            "evaluation.rendezvous_schedule_file": LaunchConfiguration('rendezvous_schedule_file'),
                                        }
                                    ],
+                                   output='screen',
+                                   # arguments=['--ros-args','--log-level','debug','--log-level','rcl:=INFO'],
                                    prefix="",#"xterm -e gdb -ex run --args", #LaunchConfiguration('launch_prefix_cslam'),# "gdbserver localhost:3000", # xterm -e gdb -ex run --args
                                    namespace=LaunchConfiguration('namespace'))
-                                  # arguments=['--ros-args','--log-level','debug'])
     
     global_descriptor_node = Node(
                                 package='cslam',

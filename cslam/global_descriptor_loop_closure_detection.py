@@ -294,10 +294,10 @@ class GlobalDescriptorLoopClosureDetection(object):
         """
         if self.params['frontend.enable_intra_robot_loop_closures']:
             kf_match, similarities = self.lcm.match_local_loop_closures(embedding, kf_id)
-            # self.node.get_logger().info(f"Similarities of image: {similarities}")
 
             if kf_match is not None:
                 msg = LocalKeyframeMatch()
+                self.node.get_logger().debug(f"KF similarity ({kf_id},{kf_match}): {similarities}")
                 msg.keyframe0_id = kf_id
                 msg.keyframe1_id = kf_match
                 self.local_match_publisher.publish(msg)

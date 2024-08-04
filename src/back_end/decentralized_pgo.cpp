@@ -807,7 +807,7 @@ void DecentralizedPGO::broadcast_tf_callback()
     //origin_to_first_pose_.transform = gtsam_pose_to_transform_msg(local_pose_at_latest_optimization_.inverse() * latest_optimized_pose_);
 
     tfsToBroadcast.push_back(origin_to_first_pose_);
-  }
+  } 
   // geometry_msgs::msg::TransformStamped origin_odom_offset;
   // origin_odom_offset.header.stamp = now;
   // origin_odom_offset.header.frame_id = MAP_FRAME_ID(robot_id_);
