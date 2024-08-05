@@ -8,17 +8,17 @@
 using namespace cslam;
 using namespace gtsam;
 
-static const auto prior_noise = noiseModel::Diagonal::Sigmas(
-  (Vector(6) << Vector3::Constant(0.3), Vector3::Constant(0.1))
-      .finished());
+// static const auto prior_noise = noiseModel::Diagonal::Sigmas(
+//   (Vector(6) << Vector3::Constant(0.3), Vector3::Constant(0.1))
+//       .finished());
 
 static const auto default_noise_model_ = noiseModel::Diagonal::Sigmas(
   (Vector(6) << Vector3::Constant(0.1), Vector3::Constant(0.01))
       .finished());
       
-static const auto loop_noise_model = noiseModel::Diagonal::Sigmas(
-  (Vector(6) << Vector3::Constant(0.3), Vector3::Constant(0.1))
-      .finished());
+// static const auto loop_noise_model = noiseModel::Diagonal::Sigmas(
+//   (Vector(6) << Vector3::Constant(0.3), Vector3::Constant(0.1))
+//       .finished());
       
 DecentralizedPGO::DecentralizedPGO(rclcpp::Node * node)
     : node_(node), max_waiting_time_sec_(60, 0)
@@ -262,6 +262,7 @@ void DecentralizedPGO::odometry_callback(
   odometry_pose_estimates_->insert(symbol, current_estimate);
   if (msg->id == 0)
   {
+    first_pose_ = current_estimate;
     current_pose_estimates_->insert(symbol, current_estimate);
   }
 
@@ -269,7 +270,7 @@ void DecentralizedPGO::odometry_callback(
   {
     gtsam::Pose3 odom_diff = latest_local_pose_.inverse() * current_estimate;
     gtsam::BetweenFactor<gtsam::Pose3> factor(latest_local_symbol_, symbol,
-                                              odom_diff, noise);
+                                              odom_diff, default_noise_model_);
     pose_graph_->push_back(factor);
   }
 
@@ -307,16 +308,16 @@ void DecentralizedPGO::intra_robot_loop_closure_callback(
         gtsam::BetweenFactor<gtsam::Pose3>(symbol_from, symbol_to, measurement,
                                            noise);
     pose_graph_->push_back(factor);
-    // auto fromPose = odometry_pose_estimates_->at<gtsam::Pose3>(symbol_from);
-    // auto toPose =  odometry_pose_estimates_->at<gtsam::Pose3>(symbol_to);
+    auto fromPose = odometry_pose_estimates_->at<gtsam::Pose3>(symbol_from);
+    auto toPose =  odometry_pose_estimates_->at<gtsam::Pose3>(symbol_to);
 
-    // auto diff = fromPose.inverse() * toPose;
+    auto diff = fromPose.inverse() * toPose;
 
-    RCLCPP_INFO(node_->get_logger(), "New intra-robot loop closure (%d, %d). - (%f, %f, %f)", 
-            msg->keyframe0_id, msg->keyframe1_id, measurement.x(), measurement.y(), measurement.z());
-    // RCLCPP_INFO(node_->get_logger(), "New intra-robot loop closure (%d, %d). - (%f, %f, %f) Odom diff: (%f, %f, %f) (%f, %f, %f)", 
-    //         msg->keyframe0_id, msg->keyframe1_id, measurement.x(), measurement.y(), measurement.z(),
-    //         diff.x(), diff.y(), diff.z(), diff.rotation().yaw(), diff.rotation().pitch(), diff.rotation().roll());
+    //RCLCPP_INFO(node_->get_logger(), "New intra-robot loop closure (%d, %d). - (%f, %f, %f)", 
+     //       msg->keyframe0_id, msg->keyframe1_id, measurement.x(), measurement.y(), measurement.z());
+    RCLCPP_INFO(node_->get_logger(), "New intra-robot loop closure (%d, %d) - (%f, %f, %f) Odom diff: (%f, %f, %f)", 
+            msg->keyframe0_id, msg->keyframe1_id, measurement.x(), measurement.y(), measurement.z(),
+            diff.x(), diff.y(), diff.z());
   }
 }
 
@@ -765,7 +766,6 @@ void DecentralizedPGO::visualization_callback()
 
 void DecentralizedPGO::update_transform_to_origin(const gtsam::Pose3 &pose)
 {
-  first_pose_to_local_origin_ = pose;
   gtsam::LabeledSymbol first_symbol(GRAPH_LABEL, ROBOT_LABEL(robot_id_), 0);
   rclcpp::Time now = node_->get_clock()->now();
   origin_to_first_pose_.header.stamp = now;
@@ -789,6 +789,10 @@ void DecentralizedPGO::update_transform_to_origin(const gtsam::Pose3 &pose)
   // Store for TF
   local_pose_at_latest_optimization_ = tentative_local_pose_at_latest_optimization_;
   latest_optimized_pose_ = current_pose_estimates_->at<gtsam::Pose3>(current_pose_estimates_->keys().back());
+
+  auto measurement = local_pose_at_latest_optimization_.inverse() * latest_optimized_pose_;
+  //RCLCPP_INFO(node_->get_logger(), "First - (%f, %f, %f) Pose offset - (%f, %f, %f)", origin_to_first_pose_.transform.translation.x, origin_to_first_pose_.transform.translation.y,
+  //origin_to_first_pose_.transform.translation.z, measurement.x(), measurement.y(), measurement.z());
 }
 
 void DecentralizedPGO::broadcast_tf_callback()
@@ -808,12 +812,6 @@ void DecentralizedPGO::broadcast_tf_callback()
 
     tfsToBroadcast.push_back(origin_to_first_pose_);
   } 
-  // geometry_msgs::msg::TransformStamped origin_odom_offset;
-  // origin_odom_offset.header.stamp = now;
-  // origin_odom_offset.header.frame_id = MAP_FRAME_ID(robot_id_);
-  // origin_odom_offset.child_frame_id = odom_tf_reference_frame_;
-  // origin_odom_offset.transform = gtsam_pose_to_transform_msg((robot_id_ == origin_robot_id_)? first_pose_to_local_origin_.inverse() : Pose3::Identity());
-  // tfsToBroadcast.push_back(origin_odom_offset);
   
 
   geometry_msgs::msg::TransformStamped latest_optimized_pose_msg;
@@ -831,6 +829,7 @@ void DecentralizedPGO::broadcast_tf_callback()
   current_transform_msg.child_frame_id = CURRENT_FRAME_ID(robot_id_);
   gtsam::Pose3 current_pose_diff = local_pose_at_latest_optimization_.inverse() * latest_local_pose_;
   current_transform_msg.transform = gtsam_pose_to_transform_msg(current_pose_diff);
+
   tfsToBroadcast.push_back(current_transform_msg);
 
   tf_broadcaster_->sendTransform(tfsToBroadcast);
@@ -852,7 +851,7 @@ DecentralizedPGO::optimize(const gtsam::NonlinearFactorGraph::shared_ptr &graph,
   }
   try{
     gtsam::GncParams<gtsam::LevenbergMarquardtParams> params;
-    params.baseOptimizerParams.setLinearSolverType(backend_linear_solver_);
+    //params.baseOptimizerParams.setLinearSolverType(backend_linear_solver_);
     //params.baseOptimizerParams.linearSolverType = gtsam::NonlinearOptimizerParams::LinearSolverType::CHOLMOD;
     gtsam::GncOptimizer<gtsam::GncParams<gtsam::LevenbergMarquardtParams>>
         optimizer(*graph, *initial, params);

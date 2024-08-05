@@ -461,23 +461,36 @@ void RGBDHandler::process_new_sensor_data()
     //Get the most recent item in the queue
     auto sensor_data = received_imagery_queue_.back();
     received_imagery_queue_.pop_back();
+
     int32_t sec = (int32_t)floor(sensor_data->stamp());
     auto stamp = rclcpp::Time(sec, (uint32_t)std::round((sensor_data->stamp()-sec) * 1e9), odom_queue_->getOldestTime().get_clock_type());
-
     auto odom = odom_queue_->getElemBeforeTime(stamp);
     if (!odom)
       return;
 
     auto odom_time = rtabmap_conversions::timestampFromROS(odom->header.stamp);
-
     //Do the best to align the odom with imagery
     auto diff = abs(sensor_data->stamp() - odom_time);
+
     while (!received_imagery_queue_.empty()) {
       auto new_diff = abs(received_imagery_queue_.back()->stamp() - odom_time);
       if(new_diff > diff)
         break;
       diff = new_diff; sensor_data = received_imagery_queue_.back();
       received_imagery_queue_.pop_back();
+    }
+
+    if (diff > 0.03) {
+      if (diff > 1.0) {
+        RCLCPP_WARN(node_->get_logger(), "Haven't recieved synced odom / sensor data for the past -- %f seconds", diff);
+      }
+      return;
+    }
+
+    if (previous_keyframe_ && sensor_data->stamp() < previous_keyframe_->stamp()) {
+      //RCLCPP_ERROR(node_->get_logger(), "Current sensor data queue %f older than last keyframe %f", sensor_data->stamp(), previous_keyframe_->stamp());
+      received_imagery_queue_.clear();
+      return;
     }
 
     sensor_msgs::msg::NavSatFix gps_fix;
@@ -599,7 +612,7 @@ void RGBDHandler::receive_local_keyframe_match(
     lc->success = false;
     if (hasMatches) {
       rtabmap::Transform t = intra_registration_.computeTransformation(
-        to, from, rtabmap::Transform(), &reg_info);
+        from, to, rtabmap::Transform(), &reg_info);
       
       if (!t.isNull())
       {
@@ -732,7 +745,7 @@ void RGBDHandler::send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorD
 
   keyframe_data_publisher_->publish(std::move(keyframe_msg));
 
-  auto odom_msg = std::make_unique<cslam_common_interfaces::msg::KeyframeOdom>() ;
+  auto odom_msg = std::make_unique<cslam_common_interfaces::msg::KeyframeOdom>();
   odom_msg->id = keypoints_data.first->id();
   odom_msg->odom = *keypoints_data.second;
   if(gps_data != nullptr) 

@@ -248,7 +248,7 @@ class GlobalDescriptorLoopClosureDetection(object):
             # Don't transmit matches that should have already been detected by the other robot
             _, neighbors_in_range_list = self.neighbor_manager.check_neighbors_in_range()
             if len(neighbors_in_range_list) == 2:
-                self.node.get_logger().info("Transmitting matches {}".format(neighbors_in_range_list))
+                self.node.get_logger().debug("Transmitting matches {}".format(neighbors_in_range_list))
                 for c in chuncks:
                     for match in c:
                         if match.robot0_id in neighbors_in_range_list and match.robot1_id in neighbors_in_range_list:
@@ -450,7 +450,7 @@ class GlobalDescriptorLoopClosureDetection(object):
                              value=str(self.log_total_successful_matches)))
         else:
             # If geo verif fails, remove candidate
-            self.node.get_logger().info(
+            self.node.get_logger().debug(
                 'Failed inter-robot loop closure measurement: (' +
                 str(msg.robot0_id) + ',' + str(msg.robot0_keyframe_id) +
                 ') -> (' + str(msg.robot1_id) + ',' +

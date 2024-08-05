@@ -315,7 +315,7 @@ namespace cslam
             other_robots_graph_and_estimates_;
 
         gtsam::Pose3 latest_local_pose_, local_pose_at_latest_optimization_,
-            tentative_local_pose_at_latest_optimization_, latest_optimized_pose_, first_pose_to_local_origin_;
+            tentative_local_pose_at_latest_optimization_, latest_optimized_pose_, first_pose_;
         gtsam::LabeledSymbol latest_local_symbol_;
 
         bool enable_pose_timestamps_recording_;
