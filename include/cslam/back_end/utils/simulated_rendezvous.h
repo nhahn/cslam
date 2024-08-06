@@ -22,7 +22,7 @@ namespace cslam
          * 
          */
     public:
-        SimulatedRendezVous(std::shared_ptr<rclcpp::Node> &node, const std::string& schedule_file, const unsigned int &robot_id);
+        SimulatedRendezVous(rclcpp::Node * node, const std::string& schedule_file, const unsigned int &robot_id);
 
         /**
          * @brief Check if the robot is alive (aka in the rendez-vous schedule)
@@ -32,7 +32,7 @@ namespace cslam
         bool is_alive();
 
     private:
-        std::shared_ptr<rclcpp::Node> node_;
+        rclcpp::Node * node_;
         unsigned int robot_id_;
         std::vector<std::pair<uint64_t, uint64_t>> rendezvous_ranges_;
         bool enabled_;

@@ -15,6 +15,9 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic -g)
 endif()
 
+set(ONNXRuntime_ROOT_DIR "/opt/onnxruntime")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(builtin_interfaces REQUIRED)
@@ -37,7 +40,6 @@ find_package(tf2_eigen REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(pcl_msgs REQUIRED)
-find_package(perception_pcl REQUIRED)
 #find_package(eigen_conversions REQUIRED)
 find_package(laser_geometry REQUIRED)
 find_package(pcl_conversions REQUIRED)
@@ -51,14 +53,7 @@ find_package(image_geometry REQUIRED)
 # find_package(rtabmap_ros REQUIRED)
 find_package(rtabmap_msgs REQUIRED)
 find_package(rtabmap_conversions REQUIRED)
-
-# Optional components
-#find_package(costmap_2d)
-#find_package(octomap_msgs)
-#find_package(apriltag_msgs)
-#find_package(find_object_2d)
-#find_package(fiducial_msgs)
-
+find_package(lightglue_onnx REQUIRED)
 find_package(RTABMap REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 
@@ -70,18 +65,10 @@ include(CheckCXXCompilerFlag)
 CHECK_CXX_COMPILER_FLAG("-std=c++17" COMPILER_SUPPORTS_CXX17)
 set(CMAKE_CXX_STANDARD 17)
 
-find_package(PCL 1.7
-            REQUIRED QUIET COMPONENTS 
-            common 
-            io 
-            kdtree 
-            search 
-            surface 
-            filters 
-            registration 
-            sample_consensus 
-            segmentation
-            ) #This crashes idl generation if all components are found?! see https://github.com/ros2/rosidl/issues/402#issuecomment-565586908
+set(ONNXRuntime_ROOT_DIR "/opt/onnxruntime")
+set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}; -O3)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindONNXRuntime.cmake)
+
 
 ###########
 ## Build ##
@@ -92,12 +79,10 @@ find_package(PCL 1.7
 # include_directories(include)
 include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/include
-  ${RTABMap_INCLUDE_DIRS}
   # ${rtabmap_ros_INCLUDE_DIRS}
   ${rtabmap_msgs_INCLUDE_DIRS}
   ${rtabmap_conversions_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
-  ${GTSAM_INCLUDE_DIR}
 )
 
 # libraries
@@ -124,47 +109,60 @@ SET(Libraries
    diagnostic_msgs
    tf2_geometry_msgs
    pcl_msgs
-   perception_pcl
-   RTABMap
+   
   #  rtabmap_ros
    rtabmap_msgs
    rtabmap_conversions
 )
 
 find_package(cslam_common_interfaces REQUIRED)
-find_package(cslam_common_interfaces REQUIRED)
+set(node_plugins "")
 
-add_executable(map_manager 
-  src/front_end/map_manager.cpp 
-  src/front_end/map_manager_node.cpp 
-  src/front_end/stereo_handler.cpp 
-  src/front_end/rgbd_handler.cpp 
-  #src/front_end/sensor_msg_utils.cpp
-  src/front_end/visualization_utils.cpp)
-add_dependencies(map_manager  
-  map_manager
-  ${${PROJECT_NAME}_EXPORTED_TARGETS})
-ament_target_dependencies(map_manager 
-  ${Libraries} 
-  cslam_common_interfaces cslam_common_interfaces)
-set_target_properties(map_manager 
-  PROPERTIES OUTPUT_NAME "map_manager")
-
-add_executable(pose_graph_manager 
+add_library(pose_graph_manager_component SHARED
   src/back_end/decentralized_pgo.cpp
-  src/back_end/pose_graph_manager_node.cpp
+  src/back_end/pose_graph_manager_component.cpp
   src/back_end/utils/logger.cpp
   src/back_end/gtsam_utils.cpp
   src/back_end/utils/simulated_rendezvous.cpp)
-add_dependencies(pose_graph_manager  
-pose_graph_manager
-  ${${PROJECT_NAME}_EXPORTED_TARGETS})
-ament_target_dependencies(pose_graph_manager 
+ament_target_dependencies(pose_graph_manager_component 
   ${Libraries}
-  cslam_common_interfaces cslam_common_interfaces)
-target_link_libraries(pose_graph_manager gtsam)
-set_target_properties(pose_graph_manager 
-  PROPERTIES OUTPUT_NAME "pose_graph_manager")
+  cslam_common_interfaces)
+target_link_libraries(pose_graph_manager_component gtsam)
+target_include_directories(pose_graph_manager_component PUBLIC
+  ${GTSAM_INCLUDE_DIR}
+)
+rclcpp_components_register_node(pose_graph_manager_component PLUGIN "cslam::PoseGraphManagerComponent" EXECUTABLE pose_graph_manager)
+set(node_plugins "${node_plugins}cslam::PoseGraphManagerComponent;$<TARGET_FILE:pose_graph_manager_component>\n")
+
+add_library(map_manager_component SHARED
+  src/front_end/map_manager.cpp 
+  src/front_end/map_manager_component.cpp 
+  src/front_end/stereo_handler.cpp 
+  src/front_end/rgbd_handler.cpp 
+  #src/front_end/sensor_msg_utils.cpp
+  src/front_end/visualization_utils.cpp
+)
+target_include_directories(map_manager_component PUBLIC
+  ${RTABMap_INCLUDE_DIRS}
+  $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_INCLUDEDIR}>
+)
+ament_target_dependencies(map_manager_component 
+  ${Libraries} RTABMap cslam_common_interfaces lightglue_onnx)
+rclcpp_components_register_node(map_manager_component PLUGIN "cslam::MapManagerComponent" EXECUTABLE map_manager)
+set(node_plugins "${node_plugins}cslam::MapManagerComponent;$<TARGET_FILE:map_manager_component>\n")
+
+cuda_add_library(global_descriptor_component SHARED
+  src/front_end/global_descriptor_component.cpp
+)
+target_link_libraries(global_descriptor_component ${ONNXRuntime_LIBRARIES})
+ament_target_dependencies(global_descriptor_component 
+  ${Libraries}  
+  cslam_common_interfaces lightglue_onnx)
+target_include_directories(global_descriptor_component PUBLIC
+  $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_INCLUDEDIR}>
+)
+rclcpp_components_register_node(global_descriptor_component PLUGIN "cslam::GlobalDescriptorComponent" EXECUTABLE global_descriptor)
+set(node_plugins "${node_plugins}cslam::GlobalDescriptorComponent;$<TARGET_FILE:global_descriptor_component>\n")
 
 # Only required when using messages built from the same package
 # https://index.ros.org/doc/ros2/Tutorials/Rosidl-Tutorial/
@@ -184,9 +182,24 @@ install(DIRECTORY
    DESTINATION share/${PROJECT_NAME}/
 )
 
+install(DIRECTORY 
+   launch
+   DESTINATION share/${PROJECT_NAME}/
+)
+
+install(TARGETS map_manager_component pose_graph_manager_component global_descriptor_component
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin)
+
+file(GENERATE
+OUTPUT
+"${CMAKE_CURRENT_BINARY_DIR}/test_ament_index/$<CONFIG>/share/ament_index/resource_index/node_plugin/${PROJECT_NAME}"
+CONTENT "${node_plugins}")
+
 # Install nodes
 install(
-  TARGETS map_manager pose_graph_manager
+  TARGETS map_manager pose_graph_manager global_descriptor
   DESTINATION lib/${PROJECT_NAME}
 )
 

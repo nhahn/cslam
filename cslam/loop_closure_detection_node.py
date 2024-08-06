@@ -38,8 +38,6 @@ class LoopClosureDetection(Node):
                         ('frontend.inter_robot_matches_topic', "inter_robot_matches"),
                         ('frontend.enable_sparsification', True),
                         ('frontend.use_vertex_cover_selection', True),
-                        ('frontend.cosplace.descriptor_dim', 64),
-                        ('frontend.cosplace.backbone', "resnet18"),
                         ('frontend.sensor_type', "stereo"),
                         ('evaluation.enable_logs', False),
                         ('evaluation.enable_sparsification_comparison', False),
@@ -83,10 +81,6 @@ class LoopClosureDetection(Node):
                 'frontend.detection_publication_max_elems_per_msg').value
         self.params["frontend.use_vertex_cover_selection"] = self.get_parameter(
             'frontend.use_vertex_cover_selection').value
-        self.params["frontend.cosplace.descriptor_dim"] = self.get_parameter(
-            'frontend.cosplace.descriptor_dim').value
-        self.params["frontend.cosplace.backbone"] = self.get_parameter(
-            'frontend.cosplace.backbone').value
         self.params["frontend.sensor_type"] = self.get_parameter(
             'frontend.sensor_type').value.lower()
         self.params["evaluation.enable_logs"] = self.get_parameter(

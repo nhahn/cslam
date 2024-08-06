@@ -50,7 +50,8 @@
   <build_depend>diagnostic_msgs</build_depend>
   <build_depend>cslam_common_interfaces</build_depend>
   <build_depend>cslam_common_interfaces</build_depend>
-
+  <build_depend>lightglue_onnx</build_depend>
+  
   <exec_depend>rclcpp</exec_depend>
   <exec_depend>rclcpp_components</exec_depend>
   <exec_depend>rclpy</exec_depend>

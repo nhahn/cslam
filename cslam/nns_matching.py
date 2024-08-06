@@ -1,7 +1,6 @@
 #!/usr/bin/env python
+import torch
 import numpy as np
-from scipy.spatial import distance
-
 
 class NearestNeighborsMatching(object):
     """Nearest Neighbor matching of description vectors
@@ -14,11 +13,12 @@ class NearestNeighborsMatching(object):
             dim (int, optional): Global descriptor size. Defaults to None.
         """
         self.n = 0
+        self.device = torch.device('cuda')
         self.dim = dim
         self.items = dict()
         self.data = []
         if dim is not None:
-            self.data = np.zeros((1000, dim), dtype='float32')
+            self.data = torch.zeros((1000, dim), dtype=torch.float32, device=self.device)
 
     def add_item(self, vector, item):
         """Add item to the matching list
@@ -27,19 +27,21 @@ class NearestNeighborsMatching(object):
             vector (np.array): descriptor
             item: identification info (e.g., int)
         """
-        assert vector.ndim == 1
+        if not torch.is_tensor(vector):
+            vector = torch.from_numpy(vector.astype(np.float32))
+            
         if self.n >= len(self.data):
             if self.dim is None:
                 self.dim = len(vector)
-                self.data = np.zeros((1000, self.dim), dtype='float32')
+                self.data = torch.zeros((1000, self.dim), dtype=torch.float32, device=self.device)
             else:
-                self.data.resize((2 * len(self.data), self.dim),
-                                 refcheck=False)
+                self.data = torch.concat((self.data, torch.zeros((self.data.shape[0], self.data.shape[1]), device=self.device)))
+
         self.items[self.n] = item
-        self.data[self.n] = vector
+        self.data[self.n] = vector.reshape(1,self.dim).to(self.device)
         self.n += 1
 
-    def search(self, query, k):  # searching from 100000 items consume 30ms
+    def search(self, query: torch.Tensor, k: int):  # searching from 100000 items consume 30ms
         """Search for nearest neighbors
 
         Args:
@@ -52,13 +54,13 @@ class NearestNeighborsMatching(object):
         if len(self.data) == 0:
             return [], []
 
-        similarities = np.zeros(self.n)
-
-        for i in range(self.n):
-            similarities[i] = 1 - distance.cosine(query, self.data[i,:].squeeze())
-
-        ns = np.argsort(similarities)[::-1][:k]
-        return [self.items[n] for n in ns], similarities[ns]
+        view = self.data[:self.n,:]
+        if not torch.is_tensor(query):
+            query = torch.from_numpy(query.astype(np.float32))
+        qTensor = query.reshape(1, self.dim).to(self.device)
+        similarity = torch.nn.functional.cosine_similarity(view, qTensor)
+        ns = torch.argsort(similarity, descending=True)[:k]
+        return [self.items[n] for n in ns.tolist()], torch.gather(similarity,0,ns).cpu().numpy()
 
     def search_best(self, query):
         """Search for the nearest neighbor

@@ -2,7 +2,7 @@
 
 using namespace cslam;
 
-SimulatedRendezVous::SimulatedRendezVous(std::shared_ptr<rclcpp::Node> &node,
+SimulatedRendezVous::SimulatedRendezVous(rclcpp::Node * node,
                                          const std::string &schedule_file,
                                          const unsigned int &robot_id) : node_(node), robot_id_(robot_id), enabled_(true)
 {

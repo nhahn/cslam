@@ -4,7 +4,6 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include <rtabmap_msgs/msg/rgbd_image.hpp>
-
 #include <rtabmap/core/Compression.h>
 #include <rtabmap/core/Memory.h>
 #include <rtabmap/core/RegistrationVis.h>
@@ -14,11 +13,13 @@
 #include <rtabmap/core/util2d.h>
 #include <rtabmap/core/util3d.h>
 #include <rtabmap/utilite/UStl.h>
+#include <mutex>
 
 #include <message_filters/subscriber.h>
 #include <message_filters/sync_policies/approximate_time.h>
 #include <message_filters/synchronizer.h>
 #include <message_filters/time_synchronizer.h>
+#include <message_filters/cache.h>
 
 #include <image_transport/image_transport.hpp>
 #include <image_transport/subscriber_filter.hpp>
@@ -49,6 +50,8 @@
 #include <rtabmap_conversions/MsgConversion.h>
 #include "cslam/front_end/sensor_handler_interface.h"
 #include "cslam/front_end/visualization_utils.h"
+#include "lightglue_onnx/LightGlueOnnxRunner.hpp"
+#include "lightglue_onnx/Configuration.hpp"
 
 namespace cslam
 {
@@ -61,8 +64,8 @@ namespace cslam
          *
          * @param node ROS 2 node handle
          */
-        RGBDHandler(std::shared_ptr<rclcpp::Node> &node);
-        ~RGBDHandler(){};
+        RGBDHandler(rclcpp::Node * node);
+        ~RGBDHandler(){delete detector_;};
 
         /**
          * @brief Processes Latest received image
@@ -103,7 +106,7 @@ namespace cslam
          *
          * @param frame_data Full frame data
          */
-        void
+        bool
         compute_local_descriptors(std::shared_ptr<rtabmap::SensorData> &frame_data);
 
         /**
@@ -112,7 +115,7 @@ namespace cslam
          * @param msg local descriptors
          * @return rtabmap::SensorData&
          */
-        virtual void local_descriptors_msg_to_sensor_data(
+        void local_descriptors_msg_to_sensor_data(
             const std::shared_ptr<
                 cslam_common_interfaces::msg::LocalImageDescriptors>
                 msg,
@@ -126,7 +129,8 @@ namespace cslam
          */
         void sensor_data_to_rgbd_msg(
             const std::shared_ptr<rtabmap::SensorData> sensor_data,
-            rtabmap_msgs::msg::RGBDImage &msg_data);
+            rtabmap_msgs::msg::SensorData &msg_data,
+            bool baselinkFrame = false);
 
         /**
          * @brief Generate a new keyframe according to the policy
@@ -141,16 +145,9 @@ namespace cslam
          * @brief Function to send the image to the python node
          *
          * @param keypoints_data keyframe keypoints data
-         */
-        void send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data);
-
-        /**
-         * @brief Function to send the image to the python node
-         *
-         * @param keypoints_data keyframe keypoints data
          * @param gps_data GPS data
          */
-        void send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data, const sensor_msgs::msg::NavSatFix& gps_data);
+        void send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data, const sensor_msgs::msg::NavSatFix * gps_data = nullptr);
 
         /**
          * @brief Send keypoints for visualizations
@@ -185,8 +182,7 @@ namespace cslam
         void rgbd_callback(
             const sensor_msgs::msg::Image::ConstSharedPtr image_rect_rgb,
             const sensor_msgs::msg::Image::ConstSharedPtr image_rect_depth,
-            const sensor_msgs::msg::CameraInfo::ConstSharedPtr camera_info_rgb,
-            const nav_msgs::msg::Odometry::ConstSharedPtr odom);
+            const sensor_msgs::msg::CameraInfo::ConstSharedPtr camera_info_rgb);
 
         /**
          * @brief Clear images and large data fields in sensor data
@@ -212,19 +208,17 @@ namespace cslam
                         const sensor_msgs::msg::PointCloud2 &input_cloud);
 
     protected:
-        std::deque<std::pair<std::shared_ptr<rtabmap::SensorData>,
-                             nav_msgs::msg::Odometry::ConstSharedPtr>>
-            received_data_queue_;
-
+        std::deque<std::shared_ptr<rtabmap::SensorData>> received_imagery_queue_;
         std::shared_ptr<rtabmap::SensorData> previous_keyframe_;
 
         std::map<int, std::shared_ptr<rtabmap::SensorData>> local_descriptors_map_;
 
-        std::shared_ptr<rclcpp::Node> node_;
+        rclcpp::Node * node_;
 
         unsigned int min_inliers_, max_nb_robots_, robot_id_, max_queue_size_,
             nb_local_keyframes_;
 
+        std::unique_ptr<message_filters::Cache<nav_msgs::msg::Odometry>> odom_queue_;
         message_filters::Subscriber<nav_msgs::msg::Odometry> sub_odometry_;
 
         rclcpp::Subscription<
@@ -253,7 +247,8 @@ namespace cslam
             cslam_common_interfaces::msg::LocalImageDescriptors>::SharedPtr
             local_descriptors_subscriber_;
 
-        rtabmap::RegistrationVis registration_;
+        rtabmap::RegistrationVis inter_registration_;
+        rtabmap::RegistrationVis intra_registration_;
 
         rclcpp::Publisher<
             cslam_common_interfaces::msg::InterRobotLoopClosure>::SharedPtr
@@ -275,7 +270,7 @@ namespace cslam
 
         std::string base_frame_id_;
         float keyframe_generation_ratio_threshold_;
-        bool generate_new_keyframes_based_on_inliers_ratio_;
+        int min_3d_keypoints_;
 
         unsigned int visualization_period_ms_;
         bool enable_visualization_;
@@ -288,21 +283,26 @@ namespace cslam
         std::deque<sensor_msgs::msg::NavSatFix>
             received_gps_queue_;
         std::string global_image_topic_;
+        tf2::Transform base_transform_; bool hasTransform_;
+        rtabmap::Feature2D * detector_;
 
     private:
+        bool setMatches(rtabmap::Signature &from, rtabmap::Signature &to);
+        std::shared_ptr<lightglue::LightGlueOnnxRunner> lightglueMatcher;
+        lightglue::Configuration lightglueConfig;
         rtabmap::ParametersMap rtabmap_parameters;
         image_transport::SubscriberFilter sub_image_color_;
         message_filters::Subscriber<sensor_msgs::msg::CameraInfo> sub_camera_info_color_;
         image_transport::SubscriberFilter sub_image_depth_;
         message_filters::Subscriber<sensor_msgs::msg::CameraInfo> sub_camera_info_depth_;
-        typedef message_filters::sync_policies::ApproximateTime<
+        typedef message_filters::sync_policies::ExactTime<
             sensor_msgs::msg::Image, sensor_msgs::msg::Image,
-            sensor_msgs::msg::CameraInfo,
-            nav_msgs::msg::Odometry>
+            sensor_msgs::msg::CameraInfo>
             RGBDSyncPolicy;
-        message_filters::Synchronizer<RGBDSyncPolicy> *rgbd_sync_policy_;
+        std::unique_ptr<message_filters::Synchronizer<RGBDSyncPolicy>> rgbd_synchronizer;
 
         sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_;
+        std::mutex map_mutex, prev_frame_mutex;
     };
 } // namespace cslam
 #endif

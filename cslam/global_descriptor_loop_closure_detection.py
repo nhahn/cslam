@@ -54,9 +54,6 @@ class GlobalDescriptorLoopClosureDetection(object):
             self.global_descriptor = ScanContext(self.params, self.node)
             self.keyframe_type = "pointcloud"
         else:
-            from cslam.vpr.cosplace import CosPlace
-            self.node.get_logger().info('Using CosPlace. (default)')
-            self.global_descriptor = CosPlace(self.params, self.node)
             self.keyframe_type = "rgb"
 
         # ROS 2 objects setup
@@ -84,7 +81,7 @@ class GlobalDescriptorLoopClosureDetection(object):
 
         if self.keyframe_type == "rgb":
             self.receive_keyframe_subscriber = self.node.create_subscription(
-                KeyframeRGB, 'cslam/keyframe_data', self.receive_keyframe, 100)
+                GlobalDescriptor, 'cslam/processed_global_descriptor', self.receive_descriptor, 100)
         elif self.keyframe_type == "pointcloud":
             self.receive_keyframe_subscriber = self.node.create_subscription(
                 KeyframePointCloud, 'cslam/keyframe_data', self.receive_keyframe,
@@ -156,7 +153,7 @@ class GlobalDescriptorLoopClosureDetection(object):
         matches = self.lcm.add_local_global_descriptor(embedding, kf_id)
         # Local matching
         self.detect_intra(embedding, kf_id)
-
+        #self.node.get_logger().info("Adding KF")
         # Store global descriptor
         msg = GlobalDescriptor()
         msg.keyframe_id = kf_id
@@ -232,7 +229,7 @@ class GlobalDescriptorLoopClosureDetection(object):
         msg.robot0_keyframe_id = edge.robot0_keyframe_id
         msg.robot1_id = edge.robot1_id
         msg.robot1_keyframe_id = edge.robot1_keyframe_id
-        msg.weight = edge.weight
+        msg.weight = float(edge.weight)
         return msg
 
     def inter_robot_matches_timer_callback(self):
@@ -251,7 +248,7 @@ class GlobalDescriptorLoopClosureDetection(object):
             # Don't transmit matches that should have already been detected by the other robot
             _, neighbors_in_range_list = self.neighbor_manager.check_neighbors_in_range()
             if len(neighbors_in_range_list) == 2:
-                self.node.get_logger().info("Transmitting matches {}".format(neighbors_in_range_list))
+                self.node.get_logger().debug("Transmitting matches {}".format(neighbors_in_range_list))
                 for c in chuncks:
                     for match in c:
                         if match.robot0_id in neighbors_in_range_list and match.robot1_id in neighbors_in_range_list:
@@ -296,9 +293,11 @@ class GlobalDescriptorLoopClosureDetection(object):
             list(int): matched keyframes
         """
         if self.params['frontend.enable_intra_robot_loop_closures']:
-            kf_match, _ = self.lcm.match_local_loop_closures(embedding, kf_id)
+            kf_match, similarities = self.lcm.match_local_loop_closures(embedding, kf_id)
+
             if kf_match is not None:
                 msg = LocalKeyframeMatch()
+                self.node.get_logger().debug(f"KF similarity ({kf_id},{kf_match}): {similarities}")
                 msg.keyframe0_id = kf_id
                 msg.keyframe1_id = kf_match
                 self.local_match_publisher.publish(msg)
@@ -318,7 +317,7 @@ class GlobalDescriptorLoopClosureDetection(object):
             if self.params["evaluation.enable_logs"]: start_time = time.time()
             # Find matches that maximize the algebraic connectivity
             selection = self.lcm.select_candidates(
-                self.params["frontend.inter_robot_loop_closure_budget"],
+                int(self.params["frontend.inter_robot_loop_closure_budget"]),
                 neighbors_is_in_range)
             
             # Extract and publish local descriptors
@@ -382,24 +381,8 @@ class GlobalDescriptorLoopClosureDetection(object):
                 vertices[key1] = [[s.robot0_id], [s.robot0_keyframe_id]]
         return vertices
 
-    def receive_keyframe(self, msg):
-        """Callback to add a keyframe 
-
-        Args:
-            msg (cslam_common_interfaces::msg::KeyframeRGB or KeyframePointCloud): Keyframe data
-        """
-        # Place recognition descriptor processing
-        embedding = []
-        if self.keyframe_type == "rgb":
-            bridge = CvBridge()
-            cv_image = bridge.imgmsg_to_cv2(msg.image,
-                                            desired_encoding='passthrough')
-            embedding = self.global_descriptor.compute_embedding(cv_image)
-        elif self.keyframe_type == "pointcloud":
-            embedding = self.global_descriptor.compute_embedding(
-                icp_utils.ros_pointcloud_to_points(msg.pointcloud))
-
-        self.add_global_descriptor_to_map(embedding, msg.id)
+    def receive_descriptor(self, msg):
+        self.add_global_descriptor_to_map(np.asarray(msg.descriptor), msg.keyframe_id)
 
     def global_descriptor_callback(self, msg):
         """Callback for descriptors received from other robots.
@@ -414,6 +397,7 @@ class GlobalDescriptorLoopClosureDetection(object):
                 match = self.lcm.add_other_robot_global_descriptor(
                     msg.descriptors[i])
                 if match is not None:
+                    # self.node.get_logger().info(f"Found potential match {match.weight}")
                     self.inter_robot_matches_buffer[
                         self.nb_inter_robot_matches] = match
                     self.nb_inter_robot_matches += 1
@@ -466,7 +450,7 @@ class GlobalDescriptorLoopClosureDetection(object):
                              value=str(self.log_total_successful_matches)))
         else:
             # If geo verif fails, remove candidate
-            self.node.get_logger().info(
+            self.node.get_logger().debug(
                 'Failed inter-robot loop closure measurement: (' +
                 str(msg.robot0_id) + ',' + str(msg.robot0_keyframe_id) +
                 ') -> (' + str(msg.robot1_id) + ',' +

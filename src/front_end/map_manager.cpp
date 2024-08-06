@@ -4,7 +4,7 @@
 using namespace cslam;
 
 template <class DataHandlerType>
-MapManager<DataHandlerType>::MapManager(std::shared_ptr<rclcpp::Node> &node)
+MapManager<DataHandlerType>::MapManager(rclcpp::Node * node)
     : node_(node), local_data_handler_(node) {
 
   node_->get_parameter("max_nb_robots", max_nb_robots_);
@@ -13,7 +13,7 @@ MapManager<DataHandlerType>::MapManager(std::shared_ptr<rclcpp::Node> &node)
                        map_manager_process_period_ms_);
 
   std::chrono::milliseconds period(map_manager_process_period_ms_);
-
+  auto callback_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   process_timer_ = node_->create_wall_timer(
       std::chrono::milliseconds(period),
       std::bind(&MapManager<DataHandlerType>::process_new_sensor_data, this));

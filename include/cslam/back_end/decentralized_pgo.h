@@ -10,6 +10,8 @@
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/slam/BetweenFactor.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
 
 #include <cslam_common_interfaces/msg/keyframe_odom.hpp>
 #include <cslam_common_interfaces/msg/optimization_result.hpp>
@@ -25,7 +27,7 @@
 #include <std_msgs/msg/u_int32.hpp>
 
 #include <tf2_ros/transform_broadcaster.h>
-
+#include <tf2_ros/static_transform_broadcaster.h>
 #include <chrono>
 #include <future>
 #include <gtsam/slam/dataset.h>
@@ -68,7 +70,7 @@ namespace cslam
          *
          * @param node ROS 2 node handle
          */
-        DecentralizedPGO(std::shared_ptr<rclcpp::Node> &node);
+        DecentralizedPGO(rclcpp::Node * node);
         ~DecentralizedPGO(){};
 
         /**
@@ -77,7 +79,7 @@ namespace cslam
          * @param msg
          */
         void odometry_callback(
-            const cslam_common_interfaces::msg::KeyframeOdom::ConstSharedPtr msg);
+            const cslam_common_interfaces::msg::KeyframeOdom::UniquePtr msg);
 
         /**
          * @brief Receives inter-robot loop closures
@@ -95,7 +97,7 @@ namespace cslam
          */
         void intra_robot_loop_closure_callback(
             const cslam_common_interfaces::msg::IntraRobotLoopClosure::
-                ConstSharedPtr msg);
+                UniquePtr msg);
 
         /**
          * @brief Receives current neighbors
@@ -111,14 +113,14 @@ namespace cslam
          *
          * @return cslam_common_interfaces::msg::PoseGraph
          */
-        cslam_common_interfaces::msg::PoseGraph fill_pose_graph_msg();
+        cslam_common_interfaces::msg::PoseGraph::UniquePtr fill_pose_graph_msg();
 
         /**
          * @brief Fill a PoseGraph message with the local data
          *
          * @return cslam_common_interfaces::msg::PoseGraph
          */
-        cslam_common_interfaces::msg::PoseGraph fill_pose_graph_msg(const cslam_common_interfaces::msg::RobotIds &msg);
+        cslam_common_interfaces::msg::PoseGraph::UniquePtr fill_pose_graph_msg(const cslam_common_interfaces::msg::RobotIds &msg);
 
         /**
          * @brief Receives request for pose graph
@@ -283,7 +285,9 @@ namespace cslam
         void check_result_and_finish_optimization();
 
     private:
-        std::shared_ptr<rclcpp::Node> node_;
+        rclcpp::Node * node_;
+        std::string odom_tf_reference_frame_;
+        std::unique_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster_;
 
         unsigned int max_nb_robots_, robot_id_, optimization_count_;
         bool enable_logs_;
@@ -295,8 +299,12 @@ namespace cslam
 
         bool enable_visualization_;
 
-        gtsam::SharedNoiseModel default_noise_model_;
-        float rotation_default_noise_std_, translation_default_noise_std_;
+        std::string base_frame_id_;
+        geometry_msgs::msg::TransformStamped base_transform_; bool hasTransform_;
+        gtsam::Pose3 base_transform_inv_;
+        std::shared_ptr<tf2_ros::Buffer>
+            tf_buffer_;
+        std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 
         gtsam::NonlinearFactorGraph::shared_ptr pose_graph_;
         gtsam::Values::shared_ptr current_pose_estimates_;
@@ -307,7 +315,7 @@ namespace cslam
             other_robots_graph_and_estimates_;
 
         gtsam::Pose3 latest_local_pose_, local_pose_at_latest_optimization_,
-            tentative_local_pose_at_latest_optimization_, latest_optimized_pose_;
+            tentative_local_pose_at_latest_optimization_, latest_optimized_pose_, first_pose_;
         gtsam::LabeledSymbol latest_local_symbol_;
 
         bool enable_pose_timestamps_recording_;
@@ -354,7 +362,7 @@ namespace cslam
             get_pose_graph_publishers_;
 
         std::map<unsigned int, bool> received_pose_graphs_;
-
+        
         std::set<unsigned int> connected_robots_;
 
         std::map<unsigned int, std::vector<unsigned int>>
