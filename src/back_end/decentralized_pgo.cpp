@@ -253,9 +253,12 @@ void DecentralizedPGO::odometry_callback(
   gtsam::Pose3 current_estimate = odometry_msg_to_pose3(msg->odom);
   const auto v = msg->odom.pose.covariance;
   gtsam::SharedNoiseModel noise = default_noise_model_;
-  if (std::any_of(v.begin(), v.end(), [](const double i) { return i != 0.0; }))  {
-    Eigen::MatrixXd covariance = Eigen::Map<Eigen::Matrix<double, 6, 6> >(msg->odom.pose.covariance.data());
-    noise = gtsam::noiseModel::Gaussian::Information(covariance);
+  if (msg->odom.pose.covariance.front() != 0.0) {
+    Vector6 diagonals;
+    for (int i = 0; i < 6; i++) {
+      diagonals[i] = msg->odom.pose.covariance[i * 7];
+    }
+    noise = gtsam::noiseModel::Diagonal::Variances(diagonals);
   }
   gtsam::LabeledSymbol symbol(GRAPH_LABEL, ROBOT_LABEL(robot_id_), msg->id);
 
@@ -296,9 +299,12 @@ void DecentralizedPGO::intra_robot_loop_closure_callback(
   if (msg->success)
   {
     gtsam::Pose3 measurement = pose_msg_to_gtsam(msg->pose.pose);
-    Eigen::MatrixXd covariance = Eigen::Map<Eigen::Matrix<double, 6, 6> >(msg->pose.covariance.data());
-    auto noise = gtsam::noiseModel::Gaussian::Information(covariance);
-    //noise->print("Noise :");
+    Vector6 diagonals;
+    for (int i = 0; i < 6; i++) {
+      diagonals[i] = msg->pose.covariance[i * 7];
+    }
+    auto noise = gtsam::noiseModel::Diagonal::Variances(diagonals);
+    
     gtsam::LabeledSymbol symbol_from(GRAPH_LABEL, ROBOT_LABEL(robot_id_),
                                      msg->keyframe0_id);
     gtsam::LabeledSymbol symbol_to(GRAPH_LABEL, ROBOT_LABEL(robot_id_),
@@ -328,9 +334,11 @@ void DecentralizedPGO::inter_robot_loop_closure_callback(
   if (msg->success)
   {
     gtsam::Pose3 measurement = pose_msg_to_gtsam(msg->pose.pose);
-    Eigen::MatrixXd covariance = Eigen::Map<const Eigen::Matrix<double, 6, 6> >(msg->pose.covariance.data());
-    auto noise = gtsam::noiseModel::Gaussian::Information(covariance);
-
+    Vector6 diagonals;
+    for (int i = 0; i < 6; i++) {
+      diagonals[i] = msg->pose.covariance[i * 7];
+    }
+    auto noise = gtsam::noiseModel::Diagonal::Variances(diagonals);
     unsigned char robot0_c = ROBOT_LABEL(msg->robot0_id);
     gtsam::LabeledSymbol symbol_from(GRAPH_LABEL, robot0_c,
                                      msg->robot0_keyframe_id);
