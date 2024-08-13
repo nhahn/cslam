@@ -261,7 +261,10 @@ void DecentralizedPGO::odometry_callback(
     noise = gtsam::noiseModel::Diagonal::Variances(diagonals);
   }
   gtsam::LabeledSymbol symbol(GRAPH_LABEL, ROBOT_LABEL(robot_id_), msg->id);
-
+  if (symbol.equals(latest_local_symbol_)) {
+    RCLCPP_WARN(node_->get_logger(), "Received repeated message for keyframe %d, check your networking config", msg->id);
+    return;
+  }
   odometry_pose_estimates_->insert(symbol, current_estimate);
   if (msg->id == 0)
   {

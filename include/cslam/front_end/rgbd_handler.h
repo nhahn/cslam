@@ -295,7 +295,7 @@ namespace cslam
         message_filters::Subscriber<sensor_msgs::msg::CameraInfo> sub_camera_info_color_;
         image_transport::SubscriberFilter sub_image_depth_;
         message_filters::Subscriber<sensor_msgs::msg::CameraInfo> sub_camera_info_depth_;
-        typedef message_filters::sync_policies::ExactTime<
+        typedef message_filters::sync_policies::ApproximateTime<
             sensor_msgs::msg::Image, sensor_msgs::msg::Image,
             sensor_msgs::msg::CameraInfo>
             RGBDSyncPolicy;
