@@ -10,6 +10,9 @@ from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterFile
 
 def launch_setup(context, *args, **kwargs):
+    tf_prefix = LaunchConfiguration('tf_prefix').perform(context).strip("/")
+    tf_prefix = f"{tf_prefix}/" if len(tf_prefix) else ""
+
     loop_detection_node = Node(package='cslam',
                                executable='loop_closure_detection_node.py',
                                name='cslam_loop_closure_detection',
@@ -19,6 +22,7 @@ def launch_setup(context, *args, **kwargs):
                                        LaunchConfiguration('robot_id'),
                                        "max_nb_robots":
                                        LaunchConfiguration('max_nb_robots'),
+                                        "tf_prefix": tf_prefix,
                                    }
                                ],
                             #    prefix=['stdbuf -o L'],
@@ -35,6 +39,7 @@ def launch_setup(context, *args, **kwargs):
                                     LaunchConfiguration('robot_id'),
                                     "max_nb_robots":
                                     LaunchConfiguration('max_nb_robots'),
+                                    "tf_prefix": tf_prefix,
                                 }
                             ],
                             output='screen',
@@ -52,6 +57,7 @@ def launch_setup(context, *args, **kwargs):
                                            LaunchConfiguration('max_nb_robots'),
                                            "evaluation.enable_simulated_rendezvous": LaunchConfiguration('enable_simulated_rendezvous'),
                                            "evaluation.rendezvous_schedule_file": LaunchConfiguration('rendezvous_schedule_file'),
+                                           "tf_prefix": tf_prefix,
                                        }
                                    ],
                                    output='screen',
@@ -90,9 +96,10 @@ def launch_setup(context, *args, **kwargs):
 def generate_launch_description():
 
     return LaunchDescription([
-        DeclareLaunchArgument('namespace', default_value='/r0',
+        DeclareLaunchArgument('namespace', default_value='',
                               description=''),
         DeclareLaunchArgument('robot_id', default_value='0', description=''),
+        DeclareLaunchArgument('tf_prefix', default_value=''),                      
         DeclareLaunchArgument('max_nb_robots', default_value='2', description=''),
         DeclareLaunchArgument('config_path', default_value='/config/', description=''),
         DeclareLaunchArgument('config_file', default_value='cslam_hl2_stereo.yaml', description=''),
