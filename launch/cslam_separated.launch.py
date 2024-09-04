@@ -15,10 +15,8 @@ def launch_setup(context, *args, **kwargs):
                                name='cslam_loop_closure_detection',
                                parameters=[
                                    ParameterFile(LaunchConfiguration('config').perform(context), allow_substs=True), {
-                                       "robot_id":
-                                       LaunchConfiguration('robot_id'),
-                                       "max_nb_robots":
-                                       LaunchConfiguration('max_nb_robots'),
+                                       "robot_id": LaunchConfiguration('robot_id'),
+                                       "max_nb_robots": LaunchConfiguration('max_nb_robots'),
                                         "tf_prefix": LaunchConfiguration('tf_prefix'),
                                    }
                                ],
@@ -32,10 +30,8 @@ def launch_setup(context, *args, **kwargs):
                             name='cslam_map_manager',
                             parameters=[
                                 ParameterFile(LaunchConfiguration('config').perform(context), allow_substs=True), {
-                                    "robot_id":
-                                    LaunchConfiguration('robot_id'),
-                                    "max_nb_robots":
-                                    LaunchConfiguration('max_nb_robots'),
+                                    "robot_id": LaunchConfiguration('robot_id'),
+                                    "max_nb_robots": LaunchConfiguration('max_nb_robots'),
                                         "tf_prefix": LaunchConfiguration('tf_prefix'),
                                 }
                             ],
@@ -48,40 +44,36 @@ def launch_setup(context, *args, **kwargs):
                                    name='cslam_pose_graph_manager',
                                    parameters=[
                                        ParameterFile(LaunchConfiguration('config').perform(context), allow_substs=True), {
-                                           "robot_id":
-                                           LaunchConfiguration('robot_id'),
-                                           "max_nb_robots":
-                                           LaunchConfiguration('max_nb_robots'),
+                                           "robot_id": LaunchConfiguration('robot_id'),
+                                           "max_nb_robots": LaunchConfiguration('max_nb_robots'),
                                            "evaluation.enable_simulated_rendezvous": LaunchConfiguration('enable_simulated_rendezvous'),
                                            "evaluation.rendezvous_schedule_file": LaunchConfiguration('rendezvous_schedule_file'),
-                                        "tf_prefix": LaunchConfiguration('tf_prefix'),
+                                           "tf_prefix": LaunchConfiguration('tf_prefix'),
                                        }
                                    ],
                                    output='screen',
                                    # arguments=['--ros-args','--log-level','debug','--log-level','rcl:=INFO'],
                                    prefix="",#"xterm -e gdb -ex run --args", #LaunchConfiguration('launch_prefix_cslam'),# "gdbserver localhost:3000", # xterm -e gdb -ex run --args
                                    namespace=LaunchConfiguration('namespace'))
-    
+
     global_descriptor_node = Node(
                                 package='cslam',
                                 executable='global_descriptor',
                                 namespace=LaunchConfiguration('namespace'),
                                 parameters=[
                                 ParameterFile(LaunchConfiguration('config').perform(context), allow_substs=True), {
-                                        "robot_id":
-                                        LaunchConfiguration('robot_id'),
-                                        "max_nb_robots":
-                                        LaunchConfiguration('max_nb_robots'),
+                                        "robot_id": LaunchConfiguration('robot_id'),
+                                        "max_nb_robots": LaunchConfiguration('max_nb_robots'),
                                         "evaluation.enable_simulated_rendezvous": LaunchConfiguration('enable_simulated_rendezvous'),
                                         "evaluation.rendezvous_schedule_file": LaunchConfiguration('rendezvous_schedule_file'),
                                     }
                                 ],
                                output='screen',
                             #   prefix="pprofile -o cslam.pprofile",
-                               
                             )
 
     return [
+        DeclareLaunchArgument('prefix', default_value=LaunchConfiguration('namespace').perform(context).replace("/",'')),
         loop_detection_node,
         map_manager_node,
         pose_graph_manager_node,
@@ -92,10 +84,9 @@ def launch_setup(context, *args, **kwargs):
 def generate_launch_description():
 
     return LaunchDescription([
-        DeclareLaunchArgument('namespace', default_value='',
-                              description=''),
+        DeclareLaunchArgument('namespace', default_value='', description=''),
         DeclareLaunchArgument('robot_id', default_value='0', description=''),
-        DeclareLaunchArgument('tf_prefix', default_value=''),                      
+        DeclareLaunchArgument('tf_prefix', default_value=''),
         DeclareLaunchArgument('max_nb_robots', default_value='2', description=''),
         DeclareLaunchArgument('config_path', default_value='/config/', description=''),
         DeclareLaunchArgument('config_file', default_value='cslam_hl2_stereo.yaml', description=''),
@@ -111,14 +102,8 @@ def generate_launch_description():
             description=
             'For debugging purpose, it fills prefix tag of the nodes, e.g., "xterm -e gdb -ex run --args"'
         ),
-        DeclareLaunchArgument('enable_simulated_rendezvous',
-                              default_value='false',
-                              description=''),
-        DeclareLaunchArgument('rendezvous_schedule_file',
-                              default_value='',
-                              description=''),
-        DeclareLaunchArgument('log_level',
-                              default_value='error',
-                              description=''),
+        DeclareLaunchArgument('enable_simulated_rendezvous', default_value='false', description=''),
+        DeclareLaunchArgument('rendezvous_schedule_file', default_value='', description=''),
+        DeclareLaunchArgument('log_level', default_value='error', description=''),
         OpaqueFunction(function=launch_setup)
     ])
