@@ -17,11 +17,11 @@ def launch_setup(context, *args, **kwargs):
                                    ParameterFile(LaunchConfiguration('config').perform(context), allow_substs=True), {
                                        "robot_id": LaunchConfiguration('robot_id'),
                                        "max_nb_robots": LaunchConfiguration('max_nb_robots'),
-                                        "tf_prefix": LaunchConfiguration('tf_prefix'),
+                                       "tf_prefix": LaunchConfiguration('tf_prefix'),
                                    }
                                ],
-                            #    prefix=['stdbuf -o L'],
-                               # arguments=['--ros-args','--log-level','debug','--log-level','rcl:=INFO'],
+                               #prefix=['stdbuf -o L'],
+                               #arguments=['--ros-args','--log-level','debug','--log-level','rcl:=INFO'],
                                output='screen',
                                namespace=LaunchConfiguration('namespace'))
 
@@ -32,11 +32,11 @@ def launch_setup(context, *args, **kwargs):
                                 ParameterFile(LaunchConfiguration('config').perform(context), allow_substs=True), {
                                     "robot_id": LaunchConfiguration('robot_id'),
                                     "max_nb_robots": LaunchConfiguration('max_nb_robots'),
-                                        "tf_prefix": LaunchConfiguration('tf_prefix'),
+                                    "tf_prefix": LaunchConfiguration('tf_prefix'),
                                 }
                             ],
                             output='screen',
-                            # arguments=['--ros-args','--log-level','debug','--log-level','rcl:=INFO'],
+                            #arguments=['--ros-args','--log-level','debug','--log-level','rcl:=INFO'],
                             namespace=LaunchConfiguration('namespace'))
 
     pose_graph_manager_node = Node(package='cslam',
@@ -52,7 +52,7 @@ def launch_setup(context, *args, **kwargs):
                                        }
                                    ],
                                    output='screen',
-                                   # arguments=['--ros-args','--log-level','debug','--log-level','rcl:=INFO'],
+                                   #arguments=['--ros-args','--log-level','debug','--log-level','rcl:=INFO'],
                                    prefix="",#"xterm -e gdb -ex run --args", #LaunchConfiguration('launch_prefix_cslam'),# "gdbserver localhost:3000", # xterm -e gdb -ex run --args
                                    namespace=LaunchConfiguration('namespace'))
 
@@ -69,7 +69,7 @@ def launch_setup(context, *args, **kwargs):
                                     }
                                 ],
                                output='screen',
-                            #   prefix="pprofile -o cslam.pprofile",
+                               #prefix="pprofile -o cslam.pprofile",
                             )
 
     return [
