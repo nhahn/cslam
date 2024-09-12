@@ -86,7 +86,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('namespace', default_value='', description=''),
         DeclareLaunchArgument('robot_id', default_value='0', description=''),
-        DeclareLaunchArgument('tf_prefix', default_value=''),
+        DeclareLaunchArgument('tf_prefix', default_value=PythonExpression(['("', LaunchConfiguration('namespace'), '".strip("/") + "/").lstrip("/")'])),
         DeclareLaunchArgument('max_nb_robots', default_value='2', description=''),
         DeclareLaunchArgument('config_path', default_value='/config/', description=''),
         DeclareLaunchArgument('config_file', default_value='cslam_hl2_stereo.yaml', description=''),

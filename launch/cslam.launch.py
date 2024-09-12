@@ -75,7 +75,6 @@ def launch_setup(context, *args, **kwargs):
                             )
 
     return [
-        DeclareLaunchArgument('prefix', default_value=LaunchConfiguration('namespace').perform(context).replace("/",'')),
         loop_detection_node,
         ComposableNodeContainer(
                 namespace=LaunchConfiguration('namespace'),
@@ -94,7 +93,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('namespace', default_value='', description=''),
-        DeclareLaunchArgument('tf_prefix', default_value=''),
+        DeclareLaunchArgument('tf_prefix', default_value=PythonExpression(['("', LaunchConfiguration('namespace'), '".strip("/") + "/").lstrip("/")'])),
         DeclareLaunchArgument('robot_id', default_value='0', description=''),
         DeclareLaunchArgument('max_nb_robots', default_value='2', description=''),
         DeclareLaunchArgument('config_path', default_value='/config/', description=''),

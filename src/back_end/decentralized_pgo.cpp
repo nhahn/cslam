@@ -209,7 +209,7 @@ DecentralizedPGO::DecentralizedPGO(rclcpp::Node * node)
   rclcpp::PublisherOptions po;
   po.use_intra_process_comm = rclcpp::IntraProcessSetting::Disable;
   reference_frame_per_robot_publisher_ =
-      node_->create_publisher<cslam_common_interfaces::msg::ReferenceFrames>(
+      node_->create_publisher<geometry_msgs::msg::TransformStamped>(
           "cslam/reference_frames", rclcpp::QoS(1).transient_local(), po);
 
   origin_robot_id_ = robot_id_;
@@ -789,9 +789,7 @@ void DecentralizedPGO::update_transform_to_origin(const gtsam::Pose3 &pose)
   // one robot reference frame to another.
   if (reference_frame_per_robot_publisher_->get_subscription_count() > 0)
   {
-    auto msg = std::make_unique<cslam_common_interfaces::msg::ReferenceFrames>();
-    msg->robot_id = robot_id_;
-    msg->origin_to_local = origin_to_first_pose_;
+    auto msg = std::make_unique<geometry_msgs::msg::TransformStamped>(origin_to_first_pose_);
     reference_frame_per_robot_publisher_->publish(std::move(msg));
     //Attach the original transform for offsetting the odom link
     //msg.transforms.emplace_back(gtsam_pose_to_transform_msg(origin_to_odom));

@@ -414,7 +414,7 @@ namespace cslam
 
         bool enable_broadcast_tf_frames_;
 
-        rclcpp::Publisher<cslam_common_interfaces::msg::ReferenceFrames>::SharedPtr
+        rclcpp::Publisher<geometry_msgs::msg::TransformStamped>::SharedPtr
             reference_frame_per_robot_publisher_;
 
         std::shared_ptr<Logger> logger_;
