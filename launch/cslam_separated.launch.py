@@ -73,7 +73,6 @@ def launch_setup(context, *args, **kwargs):
                             )
 
     return [
-        DeclareLaunchArgument('prefix', default_value=LaunchConfiguration('namespace').perform(context).replace("/",'')),
         loop_detection_node,
         map_manager_node,
         pose_graph_manager_node,

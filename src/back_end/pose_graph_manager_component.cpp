@@ -7,7 +7,7 @@ namespace cslam {
   {
     public:
       std::shared_ptr<DecentralizedPGO> manager;
-      PoseGraphManagerComponent(rclcpp::NodeOptions ops) : Node("pose_graph_manager", ops)
+      PoseGraphManagerComponent(rclcpp::NodeOptions ops) : Node("pose_graph_manager", ops.start_parameter_event_publisher(false).start_parameter_services(false))
       {
        declare_parameter<int>("max_nb_robots", 1);
        declare_parameter<int>("robot_id", 0);

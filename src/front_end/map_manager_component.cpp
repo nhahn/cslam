@@ -19,7 +19,7 @@ namespace cslam {
   {
     public:
       std::shared_ptr<IMapManager> handler;       
-      MapManagerComponent(rclcpp::NodeOptions ops) : Node("map_manager", ops)
+      MapManagerComponent(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_parameter_event_publisher(false).start_parameter_services(false))
       {
         declare_parameter<std::string>("rtabmap.log_level", "warning");
         ULogger::setType(ULogger::kTypeConsole);

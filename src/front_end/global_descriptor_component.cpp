@@ -23,7 +23,7 @@ namespace cslam {
   {
 	public:
 
-	  GlobalDescriptorComponent(rclcpp::NodeOptions ops) : Node("global_descriptor_node", ops)
+	  GlobalDescriptorComponent(rclcpp::NodeOptions ops) : Node("global_descriptor_node", ops.start_parameter_event_publisher(false).start_parameter_services(false))
 	  {
 		declare_parameter<std::string>("frontend.global_model", "/models/trt_engines/EigenplacesResNet50_128.engine");
 		std::filesystem::path model (get_parameter("frontend.global_model").as_string());
