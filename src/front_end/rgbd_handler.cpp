@@ -96,7 +96,7 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
 
   send_local_descriptors_subscriber_ = node_->create_subscription<
       cslam_common_interfaces::msg::LocalDescriptorsRequest>(
-      "cslam/local_descriptors_request", 100,
+      "/cslam/r" + std::to_string(robot_id_) + "/local_descriptors_request", 100,
       std::bind(&RGBDHandler::local_descriptors_request, this,
                 std::placeholders::_1), descriptorOptions);
 

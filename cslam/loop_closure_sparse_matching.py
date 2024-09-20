@@ -9,7 +9,7 @@ class LoopClosureSparseMatching(object):
         Then candidates are selected such that we respect the communication budget
     """
 
-    def __init__(self, params):
+    def __init__(self, params, node):
         """ Initialization of loop closure matching
 
         Args:
@@ -17,6 +17,7 @@ class LoopClosureSparseMatching(object):
         """
         # Extract params
         self.params = params
+        self.node = node
         # Initialize matching structs
         if self.params["frontend.sensor_type"] == "lidar":
             self.local_nnsm = ScanContextMatching()
@@ -66,7 +67,8 @@ class LoopClosureSparseMatching(object):
 
         match = None
         kf, similarity = self.local_nnsm.search_best(tensor)
-        if kf is not None:   
+        if kf is not None:
+            self.node.get_logger().info(f"Global sim ({kf},{msg.keyframe_id}): {similarity}") 
             if similarity >= self.params['frontend.similarity_threshold']:
                 match = EdgeInterRobot(self.params['robot_id'], kf, msg.robot_id,
                                    msg.keyframe_id, similarity)
