@@ -331,6 +331,7 @@ class GlobalDescriptorLoopClosureDetection(object):
                     msg.keyframe_id = v[1]
                     msg.matches_robot_id = vertices_info[v][0]
                     msg.matches_keyframe_id = vertices_info[v][1]
+                    self.node.get_logger().info(f"Requesting local descriptors for {msg.matches_robot_id}:{msg.matches_keyframe_id}")    
                     self.local_descriptors_request_publishers[v[0]].publish(
                         msg)
                 if self.params["evaluation.enable_logs"]:
@@ -411,6 +412,7 @@ class GlobalDescriptorLoopClosureDetection(object):
         if msg.robot_id != self.params['robot_id']:
             for match in msg.matches:
                 edge = EdgeInterRobot(match.robot0_id, match.robot0_keyframe_id, match.robot1_id, match.robot1_keyframe_id, match.weight)
+                self.node.get_logger().info(f"Received matching KF from: ({msg.robot_id})")    
                 self.lcm.candidate_selector.add_match(edge)
 
     def inter_robot_loop_closure_msg_to_edge(self, msg):
@@ -450,7 +452,7 @@ class GlobalDescriptorLoopClosureDetection(object):
                              value=str(self.log_total_successful_matches)))
         else:
             # If geo verif fails, remove candidate
-            self.node.get_logger().debug(
+            self.node.get_logger().info(
                 'Failed inter-robot loop closure measurement: (' +
                 str(msg.robot0_id) + ',' + str(msg.robot0_keyframe_id) +
                 ') -> (' + str(msg.robot1_id) + ',' +
