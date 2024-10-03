@@ -101,7 +101,7 @@ class GlobalDescriptorLoopClosureDetection(object):
             self.local_descriptors_request_publishers[
                 i] = self.node.create_publisher(
                     LocalDescriptorsRequest,
-                    '/cslam/r' + str(i) + '/local_descriptors_request', 100)
+                    '/r' + str(i) + '/cslam/local_descriptors_request', 100)
 
         # Listen for changes in node liveliness
         self.neighbor_manager = NeighborManager(
@@ -248,7 +248,7 @@ class GlobalDescriptorLoopClosureDetection(object):
             # Don't transmit matches that should have already been detected by the other robot
             _, neighbors_in_range_list = self.neighbor_manager.check_neighbors_in_range()
             if len(neighbors_in_range_list) == 2:
-                self.node.get_logger().info("Transmitting matches {}".format(neighbors_in_range_list))
+                self.node.get_logger().debug("Transmitting matches {}".format(neighbors_in_range_list))
                 for c in chuncks:
                     for match in c:
                         if match.robot0_id in neighbors_in_range_list and match.robot1_id in neighbors_in_range_list:
@@ -397,7 +397,7 @@ class GlobalDescriptorLoopClosureDetection(object):
                 match = self.lcm.add_other_robot_global_descriptor(
                     msg.descriptors[i])
                 if match is not None:
-                    self.node.get_logger().info(f"Found potential match {match.weight}")
+                    # self.node.get_logger().info(f"Found potential match {match.weight}")
                     self.inter_robot_matches_buffer[
                         self.nb_inter_robot_matches] = match
                     self.nb_inter_robot_matches += 1
