@@ -24,13 +24,14 @@ def launch_setup(context, *args, **kwargs):
                             #    prefix=['stdbuf -o L'],
                             #    output='screen',
                             #   prefix="pprofile -o cslam.pprofile",
+                                arguments=['--ros-args','--log-level',LaunchConfiguration('log_level'),'--log-level','rcl:=INFO'],
                                namespace=LaunchConfiguration('namespace'))
 
     pose_graph_manager_component = ComposableNode(
                                 package='cslam',
                                 namespace=LaunchConfiguration('namespace'),
                                 plugin='cslam::PoseGraphManagerComponent',
-                                name=f"cslam_pose_graph_manager",
+                                name=f"pose_graph_manager",
                                 parameters=[
                                 ParameterFile(LaunchConfiguration('config').perform(context), allow_substs=True), {
                                         "robot_id": LaunchConfiguration('robot_id'),
@@ -81,6 +82,7 @@ def launch_setup(context, *args, **kwargs):
                 name='cslam_container',
                 package='rclcpp_components',
                 executable='component_container_isolated',
+                arguments=['--ros-args','--log-level',LaunchConfiguration('log_level'),'--log-level','rcl:=INFO'],
                 composable_node_descriptions=[pose_graph_manager_component, global_descriptor_component, map_manager_component],
                 prefix=['stdbuf -o L'],
                 output='screen',
@@ -112,7 +114,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument('enable_simulated_rendezvous', default_value='false', description=''),
         DeclareLaunchArgument('rendezvous_schedule_file', default_value='', description=''),
-        DeclareLaunchArgument('log_level', default_value='error', description=''),
+        DeclareLaunchArgument('log_level', default_value='info', description=''),
         OpaqueFunction(function=launch_setup)
     ])
 
