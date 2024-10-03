@@ -232,7 +232,8 @@ void RGBDHandler::rgbd_callback(
 
   rclcpp::Time stamp = rtabmap_conversions::timestampFromROS(image_rect_rgb->header.stamp) > rtabmap_conversions::timestampFromROS(image_rect_depth->header.stamp) ? image_rect_rgb->header.stamp : image_rect_depth->header.stamp;
 
-  cv_bridge::CvImageConstPtr ptr_image = cv_bridge::toCvCopy(image_rect_rgb);
+  //Make sure we're passing around BGR and not RGB images
+  cv_bridge::CvImageConstPtr ptr_image = cv_bridge::toCvCopy(image_rect_rgb, "mono8");
   cv_bridge::CvImageConstPtr ptr_depth = cv_bridge::toCvCopy(image_rect_depth);
 
   CameraModel camera_model = rtabmap_conversions::cameraModelFromROS(*camera_info_rgb);
@@ -738,7 +739,7 @@ void RGBDHandler::send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorD
   // Image message
   std_msgs::msg::Header header;
   header.stamp = keypoints_data.second->header.stamp;
-  cv_bridge::CvImage image_bridge = cv_bridge::CvImage(header, img.channels() > 1? "rgb8":"mono8", img);
+  cv_bridge::CvImage image_bridge = cv_bridge::CvImage(header, img.channels() > 1? "bgr8":"mono8", img);
   auto keyframe_msg = std::make_unique<cslam_common_interfaces::msg::KeyframeRGB>();
   image_bridge.toImageMsg(keyframe_msg->image);
   keyframe_msg->id = keypoints_data.first->id();

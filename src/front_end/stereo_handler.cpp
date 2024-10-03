@@ -175,15 +175,16 @@ void StereoHandler::stereo_callback(
       RCLCPP_INFO(node_->get_logger(), "TF for cameras: %s", stereoCameraModel->localTransform().prettyPrint().c_str());
     }
 
+    //TODO for now we're testing to see if all mono images are better for place recognition
     auto ptrImageLeft = cv_bridge::toCvCopy(
         image_rect_left, image_rect_left->encoding.compare(
                            sensor_msgs::image_encodings::TYPE_8UC1) == 0 ||
                                image_rect_left->encoding.compare(
                                    sensor_msgs::image_encodings::MONO8) == 0
                            ? ""
-                       : image_rect_left->encoding.compare(
-                             sensor_msgs::image_encodings::MONO16) != 0
-                           ? "bgr8"
+                      //  : image_rect_left->encoding.compare(
+                      //        sensor_msgs::image_encodings::MONO16) != 0
+                      //      ? "bgr8"
                            : "mono8");
     auto ptrImageRight = cv_bridge::toCvCopy(
         image_rect_right, image_rect_right->encoding.compare(
