@@ -47,7 +47,7 @@ namespace cslam
         image_transport::SubscriberFilter sub_image_global_;
         message_filters::Subscriber<sensor_msgs::msg::CameraInfo> sub_camera_info_left_;
         message_filters::Subscriber<sensor_msgs::msg::CameraInfo> sub_camera_info_right_;
-        typedef message_filters::sync_policies::ExactTime<
+        typedef message_filters::sync_policies::ApproximateTime<
             sensor_msgs::msg::Image, sensor_msgs::msg::Image,
             sensor_msgs::msg::CameraInfo, sensor_msgs::msg::CameraInfo>
             StereoPolicy;
