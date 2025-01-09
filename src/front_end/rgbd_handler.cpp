@@ -20,7 +20,7 @@ using namespace cslam;
 #define MAP_FRAME_ID(id) "robot" + std::to_string(id) + "_map"
 
 RGBDHandler::RGBDHandler(rclcpp::Node * node)
-    : node_(node) ,keypointExtractorPool(2), matcherPool(2), poseEstimatorPool(2)
+    : node_(node), workerPool()//keypointExtractorPool(2), matcherPool(2), poseEstimatorPool(2)
 {
   node_->declare_parameter<std::string>("frontend.color_image_topic", "color/image");
   node_->declare_parameter<std::string>("frontend.depth_image_topic", "depth/image");
@@ -80,9 +80,6 @@ RGBDHandler::RGBDHandler(rclcpp::Node * node)
   lightglueConfig.grayScale = true;
   lightglueConfig.matcherUseTrt = true;
   lightglueConfig.extractorUseTrt = true;
-  lightglueMatcher = std::make_shared<lightglue::LightGlueOnnxRunner>();
-  lightglueMatcher->InitOrtEnv(lightglueConfig);
-  lightglueMatcher->SetMatchThresh(node_->get_parameter("frontend.matcher_threshold").as_double());
 
   nb_local_keyframes_ = 0;
   auto qos = rclcpp::SensorDataQoS().get_rmw_qos_profile();
@@ -240,7 +237,15 @@ void RGBDHandler::rgbd_callback(
   cv_bridge::CvImageConstPtr ptr_depth = cv_bridge::toCvCopy(image_rect_depth);
 
   CameraModel camera_model = rtabmap_conversions::cameraModelFromROS(*camera_info_rgb);
-
+  if (!lightglueMatcher) { //On our first bit of sensor data, initialize the lightglue matcher with the image dimensions
+    lightglueMatcher = std::make_shared<lightglue::LightGlueOnnxRunner>();
+    lightglueConfig.extractorImageDims.width = image_rect_rgb->width;
+    lightglueConfig.extractorImageDims.height = image_rect_rgb->height;
+    lightglueMatcher->InitOrtEnv(lightglueConfig);
+    lightglueMatcher->SetMatchThresh(node_->get_parameter("frontend.matcher_threshold").as_double());
+    //Since we had to do a bunch of setup here -- it's out of sync. So lets ignore this, and just go to future image
+    return;
+  }
   auto data = std::make_shared<rtabmap::SensorData>(
       ptr_image->image, ptr_depth->image,
       camera_model,
@@ -264,7 +269,7 @@ void RGBDHandler::rgbd_callback(
 }
 
 bool RGBDHandler::compute_local_descriptors(
-    std::shared_ptr<rtabmap::SensorData> &frame_data)
+    std::shared_ptr<rtabmap::SensorData> frame_data)
 {
   // Extract local descriptors
   frame_data->uncompressData();
@@ -414,7 +419,7 @@ bool RGBDHandler::setMatches(rtabmap::Signature &from, rtabmap::Signature &to) {
     return true;
 }
 
-std::pair<std::shared_ptr<rtabmap::Signature>, std::shared_ptr<rtabmap::Signature>> RGBDHandler::computeMatches(std::shared_ptr<rtabmap::SensorData> &k1, std::shared_ptr<rtabmap::SensorData> &k2) {
+std::pair<std::shared_ptr<rtabmap::Signature>, std::shared_ptr<rtabmap::Signature>> RGBDHandler::computeMatches(std::shared_ptr<rtabmap::SensorData> k1, std::shared_ptr<rtabmap::SensorData> k2) {
 
     auto from = std::make_shared<rtabmap::Signature>(*k1), to = std::make_shared<rtabmap::Signature>(*k2);
     bool hasMaches = setMatches(*from, *to);
@@ -494,9 +499,9 @@ void RGBDHandler::process_new_sensor_data()
       return;
     }
 
-    sensor_msgs::msg::NavSatFix gps_fix;
+    std::shared_ptr<sensor_msgs::msg::NavSatFix> gps_fix;
     if (enable_gps_recording_) {
-      gps_fix = received_gps_queue_.back();
+      gps_fix = std::make_shared<sensor_msgs::msg::NavSatFix>(received_gps_queue_.back());
       received_gps_queue_.pop_back();
     }
     if(base_frame_id_.length() > 0) {
@@ -523,40 +528,41 @@ void RGBDHandler::process_new_sensor_data()
 
     if (sensor_data->isValid())
     {
-        auto res = std::shared_future(keypointExtractorPool.enqueue([this](std::shared_ptr<rtabmap::SensorData> sensor_data) {
-          return compute_local_descriptors(sensor_data);
-        }, sensor_data));
-        if (!res.get()) clear_sensor_data(sensor_data);
-        if (keyframe_generation_ratio_threshold_ <= 0.99f && keyframe_generation_ratio_threshold_ >= 0.001f){
-          if (nb_local_keyframes_ > 0 && previous_keyframe_)
+        auto pushNewKfFN = [this, sensor_data, odom, gps_fix]() -> void {
           {
-            auto mRes = matcherPool.enqueue([this](std::shared_ptr<rtabmap::SensorData> sensor_data) {
-                return this->computeMatches(sensor_data, previous_keyframe_);
-            }, sensor_data);
-            auto signatures = mRes.get();
-            if (signatures.first == nullptr || signatures.second == nullptr) return clear_sensor_data(sensor_data);
-            auto newFrame = 
-              poseEstimatorPool.enqueue([this](auto a, auto b) 
-              { return generate_new_keyframe(a,b); }, signatures.first, signatures.second);
-            if (!newFrame.get()) return clear_sensor_data(sensor_data);
+            const std::lock_guard<std::mutex> lock(map_mutex);                 // Set keyframe ID
+            sensor_data->setId(nb_local_keyframes_);
+            local_descriptors_map_.insert({sensor_data->id(), sensor_data});
+            previous_keyframe_ = sensor_data;
+            nb_local_keyframes_++;
           }
-        }
-      // Set keyframe ID
-      {
-        const std::lock_guard<std::mutex> lock(map_mutex);
-        sensor_data->setId(nb_local_keyframes_);
-        local_descriptors_map_.insert({sensor_data->id(), sensor_data});
-        previous_keyframe_ = sensor_data;
-        nb_local_keyframes_++;
-      }
-      if (enable_gps_recording_) {
-        send_keyframe(std::make_pair(sensor_data, odom), &gps_fix);
-      } else {
-        // Send keyframe for loop detection
-        send_keyframe(std::make_pair(sensor_data, odom));
-      }
-      clear_sensor_data(sensor_data);
+          if (enable_gps_recording_) {
+            send_keyframe(std::make_pair(sensor_data, odom), gps_fix.get());
+          } else {
+            // Send keyframe for loop detection
+            send_keyframe(std::make_pair(sensor_data, odom), nullptr);
+          }
+          clear_sensor_data(sensor_data);
+        };
 
+        workerPool.enqueue([this, pushNewKfFN, sensor_data]() -> void {
+          if (!compute_local_descriptors(sensor_data))
+            return clear_sensor_data(sensor_data);
+          if (keyframe_generation_ratio_threshold_ > 0.99f || keyframe_generation_ratio_threshold_ < 0.001f || nb_local_keyframes_ <= 0 || !previous_keyframe_) {
+              pushNewKfFN();
+          } else {
+            workerPool.enqueue([this, pushNewKfFN, sensor_data]() -> void {
+                auto signatures =  this->computeMatches(sensor_data, previous_keyframe_);
+                if (signatures.first == nullptr || signatures.second == nullptr) return pushNewKfFN();
+
+                workerPool.enqueue([this, pushNewKfFN, signatures]() -> void { 
+                  if(generate_new_keyframe(signatures.first,signatures.second)) {
+                    pushNewKfFN();
+                  } 
+                });
+            });
+          }
+        });
     }
   }
 
@@ -617,44 +623,45 @@ void RGBDHandler::receive_local_keyframe_match(
       keyframe0 = local_descriptors_map_.at(msg->keyframe0_id);
       keyframe1 = local_descriptors_map_.at(msg->keyframe1_id);
     }
-    
-    auto mRes = matcherPool.enqueue([this](auto kf1, auto kf2) {
-        return this->computeMatches(kf1, kf2);
-    }, keyframe0, keyframe1);
-    auto lc = std::make_unique<cslam_common_interfaces::msg::IntraRobotLoopClosure>();
-    lc->keyframe0_id = msg->keyframe0_id;
-    lc->keyframe1_id = msg->keyframe1_id;
-    lc->success = false;
-    auto signatures = mRes.get();
-    if (signatures.first != nullptr && signatures.second != nullptr) {
-    auto newFrame = 
-      poseEstimatorPool.enqueue([this](auto from, auto to, cslam_common_interfaces::msg::IntraRobotLoopClosure * lc) 
-      { 
-        rtabmap::RegistrationInfo reg_info;
+     workerPool.enqueue([this, keyframe0, keyframe1, msg]() -> void {
+        auto signatures = this->computeMatches(keyframe0, keyframe1);
+        if (signatures.first == nullptr || signatures.second == nullptr) {
+          auto lc = std::make_unique<cslam_common_interfaces::msg::IntraRobotLoopClosure>();
+          lc->keyframe0_id = msg->keyframe0_id;
+          lc->keyframe1_id = msg->keyframe1_id;
+          lc->success = false;
+          intra_robot_loop_closure_publisher_->publish(std::move(lc));
+        } else {
+          workerPool.enqueue([this,signatures, msg]() -> void
+            { 
+              auto lc = std::make_unique<cslam_common_interfaces::msg::IntraRobotLoopClosure>();
+              lc->keyframe0_id = msg->keyframe0_id;
+              lc->keyframe1_id = msg->keyframe1_id;
+              lc->success = false;
+              rtabmap::RegistrationInfo reg_info;
 
-        rtabmap::Transform t = intra_registration_.computeTransformation(
-          *from, *to, rtabmap::Transform(), &reg_info);
-        if (!t.isNull())
-        {
-          lc->success = true;
-          auto fluFrame = CameraModel::opticalRotation() * t * CameraModel::opticalRotation().inverse();
-          RCLCPP_DEBUG(node_->get_logger(), "Intra loop closure: %s", t.prettyPrint().c_str());
-          reg_info.covariance.reshape(1,1).copyTo(lc->pose.covariance);
-          rtabmap_conversions::transformToPoseMsg(fluFrame, lc->pose.pose);
+              rtabmap::Transform t = inter_registration_.computeTransformation(
+                  *signatures.first, *signatures.second, rtabmap::Transform(), &reg_info);
+            
+              if (!t.isNull())
+              {
+                lc->success = true;
+                auto fluFrame = CameraModel::opticalRotation() * t * CameraModel::opticalRotation().inverse();
+                reg_info.covariance.reshape(1,1).copyTo(lc->pose.covariance);
+                rtabmap_conversions::transformToPoseMsg(fluFrame, lc->pose.pose);
+              }
+              else
+              {
+                RCLCPP_DEBUG(
+                    node_->get_logger(),
+                    "Intra-robot loop closure failed - could not compute transformation between (%d,%d) : %s",
+                    lc->keyframe0_id, lc->keyframe1_id,
+                    reg_info.rejectedMsg.c_str());
+              }
+              intra_robot_loop_closure_publisher_->publish(std::move(lc));
+            });
         }
-        else
-        {
-          RCLCPP_DEBUG(
-              node_->get_logger(),
-              "Intra-robot loop closure failed - could not compute transformation between (%d,%d) : %s",
-              lc->keyframe0_id, lc->keyframe1_id,
-              reg_info.rejectedMsg.c_str());
-        }
-        return !t.isNull();
-      }, signatures.first, signatures.second, lc.get()).get();
-    }
-
-    intra_robot_loop_closure_publisher_->publish(std::move(lc));
+    });
   }
   catch (std::exception &e)
   {
@@ -705,44 +712,50 @@ void RGBDHandler::receive_local_image_descriptors(
           from = local_descriptors_map_.at(local_keyframe_id);
         }
 
-        auto mRes = std::shared_future(matcherPool.enqueue([this](auto kf1, auto kf2) {
-            return this->computeMatches(kf1, kf2);
-        }, from, to));
-        auto lc = std::make_unique<cslam_common_interfaces::msg::InterRobotLoopClosure>();
-        lc->robot0_id = robot_id_;
-        lc->robot0_keyframe_id = local_keyframe_id;
-        lc->robot1_id = msg->robot_id;
-        lc->robot1_keyframe_id = msg->keyframe_id;
-        lc->success = false;
-        auto signatures = mRes.get();
-        if (signatures.first != nullptr && signatures.second != nullptr) {
-        auto newFrame = std::shared_future(
-          poseEstimatorPool.enqueue([this](auto from, auto to, cslam_common_interfaces::msg::InterRobotLoopClosure * lc) 
-          { 
-            rtabmap::RegistrationInfo reg_info;
+        workerPool.enqueue([this, local_keyframe_id, from, to, msg]() -> void {
+            auto signatures = this->computeMatches(from, to);
+            if (signatures.first == nullptr || signatures.second == nullptr) {
+              auto lc = std::make_unique<cslam_common_interfaces::msg::InterRobotLoopClosure>();
+              lc->robot0_id = robot_id_;
+              lc->robot0_keyframe_id = local_keyframe_id;
+              lc->robot1_id = msg->robot_id;
+              lc->robot1_keyframe_id = msg->keyframe_id;
+              lc->success = false;
+              inter_robot_loop_closure_publisher_->publish(std::move(lc));
+            } else {
+              workerPool.enqueue([this, msg, from, to, local_keyframe_id]() -> void
+                { 
+                  auto lc = std::make_unique<cslam_common_interfaces::msg::InterRobotLoopClosure>();
+                  lc->robot0_id = robot_id_;
+                  lc->robot0_keyframe_id = local_keyframe_id;
+                  lc->robot1_id = msg->robot_id;
+                  lc->robot1_keyframe_id = msg->keyframe_id;
+                  lc->success = false;
+                  rtabmap::RegistrationInfo reg_info;
 
-            rtabmap::Transform t = inter_registration_.computeTransformation(
-                *from, *to, rtabmap::Transform(), &reg_info);
-          
-            if (!t.isNull())
-            {
-              lc->success = true;
-              auto fluFrame = CameraModel::opticalRotation() * t * CameraModel::opticalRotation().inverse();
-              reg_info.covariance.reshape(1,1).copyTo(lc->pose.covariance);
-              rtabmap_conversions::transformToPoseMsg(fluFrame, lc->pose.pose);
+                  rtabmap::Transform t = inter_registration_.computeTransformation(
+                      *from, *to, rtabmap::Transform(), &reg_info);
+                
+                  if (!t.isNull())
+                  {
+                    lc->success = true;
+                    auto fluFrame = CameraModel::opticalRotation() * t * CameraModel::opticalRotation().inverse();
+                    reg_info.covariance.reshape(1,1).copyTo(lc->pose.covariance);
+                    rtabmap_conversions::transformToPoseMsg(fluFrame, lc->pose.pose);
+                  }
+                  else
+                  {
+                    RCLCPP_DEBUG(
+                        node_->get_logger(),
+                        "Inter-robot loop closure failed between (%d,%d) and (%d,%d): %s",
+                        lc->robot0_id, lc->robot0_keyframe_id, lc->robot1_id, lc->robot1_keyframe_id,
+                        reg_info.rejectedMsg.c_str());
+                  }
+                  inter_robot_loop_closure_publisher_->publish(std::move(lc));
+                });
             }
-            else
-            {
-              RCLCPP_DEBUG(
-                  node_->get_logger(),
-                  "Inter-robot loop closure failed between (%d,%d) and (%d,%d): %s",
-                  lc->robot0_id, lc->robot0_keyframe_id, lc->robot1_id, lc->robot1_keyframe_id,
-                  reg_info.rejectedMsg.c_str());
-            }
-            return !t.isNull();
-          }, signatures.first, signatures.second, lc.get())).get();
-          inter_robot_loop_closure_publisher_->publish(std::move(lc));
-        }
+        });
+
       }
       catch (std::exception &e)
       {
@@ -805,7 +818,7 @@ void RGBDHandler::send_visualization(const std::pair<std::shared_ptr<rtabmap::Se
   send_visualization_pointcloud(keypoints_data.first);
 }
 
-void RGBDHandler::clear_sensor_data(std::shared_ptr<rtabmap::SensorData>& sensor_data)
+void RGBDHandler::clear_sensor_data(std::shared_ptr<rtabmap::SensorData> sensor_data)
 {
   // Clear costly data
   sensor_data->clearCompressedData();

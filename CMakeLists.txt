@@ -174,6 +174,7 @@ get_rmw_typesupport(typesupport_impls "${rmw_implementation}" LANGUAGE "cpp")
 install(DIRECTORY include/${PROJECT_NAME}/
    DESTINATION include/${PROJECT_NAME}
    FILES_MATCHING PATTERN "*.h"
+   PATTERN "*.hpp"
    PATTERN ".svn" EXCLUDE
 )
 

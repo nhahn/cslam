@@ -177,6 +177,15 @@ void StereoHandler::stereo_callback(
       RCLCPP_INFO(node_->get_logger(), "TF for cameras: %s", stereoCameraModel->localTransform().prettyPrint().c_str());
     }
 
+    if (!lightglueMatcher) { //On our first bit of sensor data, initialize the lightglue matcher with the image dimensions
+      lightglueMatcher = std::make_shared<lightglue::LightGlueOnnxRunner>();
+      lightglueConfig.extractorImageDims.width = image_rect_left->width;
+      lightglueConfig.extractorImageDims.height = image_rect_left->height;
+      lightglueMatcher->InitOrtEnv(lightglueConfig);
+      lightglueMatcher->SetMatchThresh(node_->get_parameter("frontend.matcher_threshold").as_double());
+      //Since we had to do a bunch of setup here -- it's out of sync. So lets ignore this, and just go to future image
+      return;
+    }
     //TODO for now we're testing to see if all mono images are better for place recognition
     auto ptrImageLeft = cv_bridge::toCvCopy(
         image_rect_left, image_rect_left->encoding.compare(

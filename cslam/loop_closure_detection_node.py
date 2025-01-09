@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Loop Closure Detection service
 # Abstraction to support multiple implementations of loop closure detection for benchmarking
-
+import sys
 import rclpy
 from rclpy.node import Node
 from rclpy.clock import Clock
@@ -95,10 +95,18 @@ class LoopClosureDetection(Node):
             self.glcd.detect_inter, clock=Clock())
 
 
-if __name__ == '__main__':
-
-    rclpy.init(args=None)
+def main(argv=sys.argv[1:]):
+    rclpy.init(args=argv)
     lcd = LoopClosureDetection()
     lcd.get_logger().info('Initialization done.')
-    rclpy.spin(lcd)
-    rclpy.shutdown()
+    try:
+        rclpy.spin(lcd)
+    except KeyboardInterrupt:
+        print("Keyboard interrupt -- shutting down")
+
+    rclpy.try_shutdown()
+
+
+if __name__ == '__main__':
+	main()
+

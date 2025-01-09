@@ -50,7 +50,7 @@ DecentralizedPGO::DecentralizedPGO(rclcpp::Node * node)
                        visualization_period_ms_);
   node_->get_parameter("frontend.sensor_base_frame_id", base_frame_id_);
 
-  int max_waiting_param;
+  int max_waiting_param = 60;
   node_->get_parameter("backend.max_waiting_time_sec", max_waiting_param);
   max_waiting_time_sec_ = rclcpp::Duration(max_waiting_param, 0);
   node_->get_parameter("backend.solver", backend_linear_solver_);
@@ -251,7 +251,6 @@ void DecentralizedPGO::odometry_callback(
     const cslam_common_interfaces::msg::KeyframeOdom::UniquePtr msg)
 {
   gtsam::Pose3 current_estimate = odometry_msg_to_pose3(msg->odom);
-  const auto v = msg->odom.pose.covariance;
   gtsam::SharedNoiseModel noise = default_noise_model_;
   if (msg->odom.pose.covariance.front() != 0.0) {
     Vector6 diagonals;

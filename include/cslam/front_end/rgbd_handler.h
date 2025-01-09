@@ -108,7 +108,7 @@ namespace cslam
          * @param frame_data Full frame data
          */
         bool
-        compute_local_descriptors(std::shared_ptr<rtabmap::SensorData> &frame_data);
+        compute_local_descriptors(std::shared_ptr<rtabmap::SensorData> frame_data);
 
         /**
          * @brief converts descriptors to sensore data
@@ -190,7 +190,7 @@ namespace cslam
          *
          * @param sensor_data frame data
          */
-        void clear_sensor_data(std::shared_ptr<rtabmap::SensorData> &sensor_data);
+        void clear_sensor_data(std::shared_ptr<rtabmap::SensorData> sensor_data);
 
         /**
          * @brief GPS data callback
@@ -286,12 +286,12 @@ namespace cslam
         std::string global_image_topic_;
         tf2::Transform base_transform_; bool hasTransform_;
         rtabmap::Feature2D * detector_;
+        std::shared_ptr<lightglue::LightGlueOnnxRunner> lightglueMatcher;
+        lightglue::Configuration lightglueConfig;
 
     private:
         bool setMatches(rtabmap::Signature &from, rtabmap::Signature &to);
-        std::pair<std::shared_ptr<rtabmap::Signature>, std::shared_ptr<rtabmap::Signature>> computeMatches(std::shared_ptr<rtabmap::SensorData> &k1, std::shared_ptr<rtabmap::SensorData> &k2);
-        std::shared_ptr<lightglue::LightGlueOnnxRunner> lightglueMatcher;
-        lightglue::Configuration lightglueConfig;
+        std::pair<std::shared_ptr<rtabmap::Signature>, std::shared_ptr<rtabmap::Signature>> computeMatches(std::shared_ptr<rtabmap::SensorData> k1, std::shared_ptr<rtabmap::SensorData> k2);
         rtabmap::ParametersMap rtabmap_parameters;
         image_transport::SubscriberFilter sub_image_color_;
         message_filters::Subscriber<sensor_msgs::msg::CameraInfo> sub_camera_info_color_;
@@ -305,8 +305,8 @@ namespace cslam
 
         sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_;
         std::mutex map_mutex, prev_frame_mutex;
-
-        ThreadPool keypointExtractorPool, matcherPool, poseEstimatorPool;
+        ThreadPool workerPool;
+        //ThreadPool keypointExtractorPool, matcherPool, poseEstimatorPool;
     };
 } // namespace cslam
 #endif
