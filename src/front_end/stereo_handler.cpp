@@ -9,6 +9,7 @@ StereoHandler::StereoHandler(rclcpp::Node * node)
     : RGBDHandler(node) {
   node_->declare_parameter<std::string>("frontend.left_image_topic", "left/image_rect");
   node_->declare_parameter<std::string>("frontend.right_image_topic", "right/image_rect");
+  node_->declare_parameter<float>("frontend.sync_period", 0.2);
   node_->declare_parameter<std::string>("frontend.left_camera_info_topic",
                                        "left/camera_info");
   node_->declare_parameter<std::string>("frontend.right_camera_info_topic",
@@ -32,6 +33,7 @@ StereoHandler::StereoHandler(rclcpp::Node * node)
   stereo_synchronizer = std::make_unique<message_filters::Synchronizer<StereoPolicy>>(
         StereoPolicy(max_queue_size_), sub_image_rect_left_, sub_image_rect_right_,
         sub_camera_info_left_, sub_camera_info_right_);
+  //stereo_synchronizer->getPolicy()->setMaxIntervalDuration(rclcpp::Duration::from_seconds(node_->get_parameter("frontend.sync_period").as_double()));
   stereo_synchronizer->registerCallback(
         std::bind(&StereoHandler::stereo_callback, this, std::placeholders::_1,
                     std::placeholders::_2, std::placeholders::_3,

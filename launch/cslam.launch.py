@@ -81,7 +81,7 @@ def launch_setup(context, *args, **kwargs):
                 namespace=LaunchConfiguration('namespace'),
                 name='cslam_container',
                 package='rclcpp_components',
-                executable='component_container_isolated',
+                executable='component_container_mt',
                 arguments=['--ros-args','--log-level',LaunchConfiguration('log_level'),'--log-level','rcl:=INFO'],
                 composable_node_descriptions=[pose_graph_manager_component, global_descriptor_component, map_manager_component],
                 prefix=['stdbuf -o L'],

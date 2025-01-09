@@ -17,6 +17,7 @@ namespace cslam {
 class IMapManager {
   public:
     virtual ~IMapManager() {};
+    std::weak_ptr<rclcpp::executors::MultiThreadedExecutor> executor;
 };
 
 /**
@@ -55,6 +56,7 @@ private:
   DataHandlerType local_data_handler_;
 
   rclcpp::TimerBase::SharedPtr process_timer_;
+
 };
 
 // List possible data types for C++ linker

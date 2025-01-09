@@ -11,9 +11,8 @@ MapManager<DataHandlerType>::MapManager(rclcpp::Node * node)
   node_->get_parameter("robot_id", robot_id_);
   node_->get_parameter("frontend.map_manager_process_period_ms",
                        map_manager_process_period_ms_);
-
   std::chrono::milliseconds period(map_manager_process_period_ms_);
-  auto callback_group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  auto callback_group = node->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
   process_timer_ = node_->create_wall_timer(
       std::chrono::milliseconds(period),
       std::bind(&MapManager<DataHandlerType>::process_new_sensor_data, this));

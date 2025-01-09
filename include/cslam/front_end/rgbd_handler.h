@@ -27,7 +27,7 @@
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 
-#include <cv_bridge/cv_bridge.h>
+#include <cv_bridge/cv_bridge.hpp>
 
 #include <chrono>
 #include <cslam_common_interfaces/msg/keyframe_odom.hpp>
@@ -52,6 +52,7 @@
 #include "cslam/front_end/visualization_utils.h"
 #include "lightglue_onnx/LightGlueOnnxRunner.hpp"
 #include "lightglue_onnx/Configuration.hpp"
+#include "cslam/front_end/utils/thread_pool.hpp"
 
 namespace cslam
 {
@@ -139,7 +140,7 @@ namespace cslam
          * @return true A new keyframe is added to the map
          * @return false The frame is rejected
          */
-        bool generate_new_keyframe(std::shared_ptr<rtabmap::SensorData> &keyframe);
+        bool generate_new_keyframe(std::shared_ptr<rtabmap::Signature> from, std::shared_ptr<rtabmap::Signature> to);
 
         /**
          * @brief Function to send the image to the python node
@@ -288,6 +289,7 @@ namespace cslam
 
     private:
         bool setMatches(rtabmap::Signature &from, rtabmap::Signature &to);
+        std::pair<std::shared_ptr<rtabmap::Signature>, std::shared_ptr<rtabmap::Signature>> computeMatches(std::shared_ptr<rtabmap::SensorData> &k1, std::shared_ptr<rtabmap::SensorData> &k2);
         std::shared_ptr<lightglue::LightGlueOnnxRunner> lightglueMatcher;
         lightglue::Configuration lightglueConfig;
         rtabmap::ParametersMap rtabmap_parameters;
@@ -303,6 +305,8 @@ namespace cslam
 
         sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_;
         std::mutex map_mutex, prev_frame_mutex;
+
+        ThreadPool keypointExtractorPool, matcherPool, poseEstimatorPool;
     };
 } // namespace cslam
 #endif

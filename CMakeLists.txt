@@ -131,7 +131,7 @@ target_link_libraries(pose_graph_manager_component gtsam)
 target_include_directories(pose_graph_manager_component PUBLIC
   ${GTSAM_INCLUDE_DIR}
 )
-rclcpp_components_register_node(pose_graph_manager_component PLUGIN "cslam::PoseGraphManagerComponent" EXECUTABLE pose_graph_manager)
+rclcpp_components_register_node(pose_graph_manager_component PLUGIN "cslam::PoseGraphManagerComponent" EXECUTABLE pose_graph_manager EXECUTOR MultiThreadedExecutor)
 set(node_plugins "${node_plugins}cslam::PoseGraphManagerComponent;$<TARGET_FILE:pose_graph_manager_component>\n")
 
 add_library(map_manager_component SHARED
@@ -148,7 +148,7 @@ target_include_directories(map_manager_component PUBLIC
 )
 ament_target_dependencies(map_manager_component 
   ${Libraries} RTABMap cslam_common_interfaces lightglue_onnx)
-rclcpp_components_register_node(map_manager_component PLUGIN "cslam::MapManagerComponent" EXECUTABLE map_manager)
+rclcpp_components_register_node(map_manager_component PLUGIN "cslam::MapManagerComponent" EXECUTABLE map_manager EXECUTOR MultiThreadedExecutor)
 set(node_plugins "${node_plugins}cslam::MapManagerComponent;$<TARGET_FILE:map_manager_component>\n")
 
 cuda_add_library(global_descriptor_component SHARED
