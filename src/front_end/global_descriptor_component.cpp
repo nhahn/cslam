@@ -66,7 +66,7 @@ namespace cslam {
 			try{
         		GlobalMatcher->compute_embedding(keyframe->image, embedding);
 				auto globalDescriptorMsg = std::make_unique<cslam_common_interfaces::msg::GlobalDescriptor>();
-				for(int i = 0; i < embedding.size(); i++) {
+				for(size_t i = 0; i < embedding.size(); i++) {
 					globalDescriptorMsg->descriptor.push_back(embedding[i]);
 				}
 				globalDescriptorMsg->keyframe_id = keyframe_msg->id; 

@@ -43,9 +43,9 @@ def launch_setup(context, *args, **kwargs):
                                 ],
                                 extra_arguments=[{'use_intra_process_comms': True}]
                             )
-    map_manager_component = ComposableNode(
+    map_manager = ComposableNode(
                             package='cslam',
-                            plugin='cslam::MapManagerComponent',
+                            plugin='cslam::MapManager',
                             namespace=LaunchConfiguration('namespace'),
                             name=f"map_manager",
                             parameters=[
@@ -83,7 +83,7 @@ def launch_setup(context, *args, **kwargs):
                 package='rclcpp_components',
                 executable='component_container_mt',
                 arguments=['--ros-args','--log-level',LaunchConfiguration('log_level'),'--log-level','rcl:=INFO'],
-                composable_node_descriptions=[pose_graph_manager_component, global_descriptor_component, map_manager_component],
+                composable_node_descriptions=[pose_graph_manager_component, global_descriptor_component, map_manager],
                 prefix=['stdbuf -o L'],
                 output='screen',
                 #  prefix="gdbgui --args",
