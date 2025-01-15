@@ -1,3 +1,4 @@
+#include <string>
 #include "cslam/front_end/map_manager.h"
 #include <rtabmap/utilite/ULogger.h>
 #include "cslam/MMeter.h"
@@ -252,6 +253,8 @@ bool MapManager::compute_local_descriptors(
     }
   }
   try {
+    RCLCPP_DEBUG(get_logger(), "Models: rgbd: %lu, stereo: %lu ", frame_data->cameraModels().size(), frame_data->stereoCameraModels().size());
+
     auto extData = lightglueMatcher->Extractor(lightglueConfig, image);
     std::vector<cv::Point3f> kpts3D = detector_->generateKeypoints3D(*frame_data, extData.first);
     int valid3DKpts = 0;
@@ -262,7 +265,7 @@ bool MapManager::compute_local_descriptors(
     }
 
     if(valid3DKpts < min_3d_keypoints_){
-      RCLCPP_DEBUG(get_logger(), "Rejecting keyframe due to the low number of 3D keypoints detected (%lu/%d) - min ", valid3DKpts, extData.first.size(), min_3d_keypoints_);
+      RCLCPP_DEBUG(get_logger(), "Rejecting keyframe due to the low number of 3D keypoints detected (%d/%lu) - min ", valid3DKpts, extData.first.size(), min_3d_keypoints_);
       return false;
     }
     //Reduce our descriptor size here for easier storage and transmission

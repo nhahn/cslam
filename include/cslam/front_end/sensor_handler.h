@@ -63,9 +63,12 @@ namespace cslam
             std::shared_ptr<tf2_ros::Buffer>
                 tf_buffer_;
             std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+            std::shared_ptr<rtabmap::StereoCameraModel> stereoCameraModel {nullptr};
         private:
             rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr gps_subscriber_;
-
+            rtabmap::Transform stereoTransform;
+            bool alreadyRectified = true;
+            std::shared_ptr<rtabmap::StereoCameraModel> fetchStereoModel(const rtabmap_msgs::msg::SensorData::ConstSharedPtr sensorMsg);
             message_filters::Subscriber<nav_msgs::msg::Odometry> sub_odometry_;
 
 

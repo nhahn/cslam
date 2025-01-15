@@ -42,7 +42,6 @@ namespace cslam
 
 
     private:
-        std::shared_ptr<rtabmap::StereoCameraModel> stereoCameraModel {nullptr};
 
         image_transport::SubscriberFilter sub_image_rect_left_;
         image_transport::SubscriberFilter sub_image_rect_right_;

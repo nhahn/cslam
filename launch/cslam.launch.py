@@ -14,6 +14,7 @@ def launch_setup(context, *args, **kwargs):
     loop_detection_node = Node(package='cslam',
                                executable='loop_closure_detection_node.py',
                                name='cslam_loop_closure_detection',
+                               
                                parameters=[
                                    ParameterFile(LaunchConfiguration('config').perform(context), allow_substs=True), {
                                        "robot_id": LaunchConfiguration('robot_id'),
@@ -24,7 +25,7 @@ def launch_setup(context, *args, **kwargs):
                             #    prefix=['stdbuf -o L'],
                             #    output='screen',
                             #   prefix="pprofile -o cslam.pprofile",
-                                arguments=['--ros-args','--log-level',LaunchConfiguration('log_level'),'--log-level','rcl:=INFO'],
+                                arguments=['--ros-args','--log-level',LaunchConfiguration('log_level'),'--log-level','rcl:=INFO', '--log-level','rmw_zenoh_cpp:=FATAL'],
                                namespace=LaunchConfiguration('namespace'))
 
     pose_graph_manager_component = ComposableNode(
@@ -82,7 +83,7 @@ def launch_setup(context, *args, **kwargs):
                 name='cslam_container',
                 package='rclcpp_components',
                 executable='component_container_mt',
-                arguments=['--ros-args','--log-level',LaunchConfiguration('log_level'),'--log-level','rcl:=INFO'],
+                arguments=['--ros-args','--log-level',LaunchConfiguration('log_level'),'--log-level','rcl:=INFO', '--log-level','rmw_zenoh_cpp:=FATAL'],
                 composable_node_descriptions=[pose_graph_manager_component, global_descriptor_component, map_manager],
                 prefix=['stdbuf -o L'],
                 output='screen',
