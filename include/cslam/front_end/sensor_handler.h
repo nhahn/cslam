@@ -55,7 +55,7 @@ namespace cslam
         std::deque<sensor_msgs::msg::NavSatFix>
             received_gps_queue_;
         std::string base_frame_id_;
-        std::atomic_ulong map_id{0}; 
+        std::atomic_ulong map_id{0}; int resetCounter = 4;
             
         protected:
             rclcpp::Node * node_;

@@ -127,7 +127,7 @@ public:
        * @param frame_data Full frame data
        */
       bool
-      compute_local_descriptors(std::shared_ptr<rtabmap::SensorData> frame_data);
+      compute_local_descriptors(std::shared_ptr<rtabmap::SensorData> frame_data, const cv::Mat &img);
 
       /**
        * @brief converts descriptors to sensore data
@@ -159,7 +159,7 @@ public:
        * @return true A new keyframe is added to the map
        * @return false The frame is rejected
        */
-      bool generate_new_keyframe(const std::shared_ptr<rtabmap::SensorData> data);
+      bool generate_new_keyframe(const std::shared_ptr<rtabmap::SensorData> data, const cv::Mat &img);
 
       /**
        * @brief Function to send the image to the python node
@@ -237,9 +237,9 @@ public:
             cslam_common_interfaces::msg::LocalImageDescriptors>::SharedPtr
             local_descriptors_subscriber_;
 
-        rtabmap::RegistrationVis inter_registration_;
-        rtabmap::RegistrationVis intra_registration_;
-        rtabmap::RegistrationVis f2f_registration_;
+        std::shared_ptr<rtabmap::RegistrationVis> inter_registration_;
+        std::shared_ptr<rtabmap::RegistrationVis> intra_registration_;
+        std::shared_ptr<rtabmap::RegistrationVis> f2f_registration_;
 
         rclcpp::Publisher<
             cslam_common_interfaces::msg::InterRobotLoopClosure>::SharedPtr
@@ -267,15 +267,16 @@ public:
         rtabmap::Feature2D * detector_;
         std::shared_ptr<lightglue::LightGlueOnnxRunner> lightglueMatcher;
         lightglue::Configuration lightglueConfig;
-        OpticalFlow optical_matcher;
+        std::shared_ptr<OpticalFlow> optical_matcher;
     private:
         std::shared_ptr<SensorHandler> sensor_handler_ {nullptr};
+        rclcpp::CallbackGroup::SharedPtr timerCB;
         bool setMatches(rtabmap::Signature &from, rtabmap::Signature &to);
         std::pair<std::shared_ptr<rtabmap::Signature>, std::shared_ptr<rtabmap::Signature>> computeMatches(std::shared_ptr<rtabmap::SensorData> k1, std::shared_ptr<rtabmap::SensorData> k2);
         rtabmap::ParametersMap rtabmap_parameters;
         sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_;
         std::mutex map_mutex, prev_frame_mutex;
-        ThreadPool workerPool;
+        std::shared_ptr<ThreadPool> workerPool;
         //ThreadPool keypointExtractorPool, matcherPool, poseEstimatorPool;
   
 

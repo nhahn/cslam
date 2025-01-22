@@ -197,22 +197,16 @@ install(TARGETS map_manager_component pose_graph_manager_component global_descri
 
 option(PROFILE "Build the map manager profiler tool")
 if(PROFILE)
-  target_compile_definitions(map_manager_component PUBLIC MMETER_ENABLE=1)
+  target_compile_definitions(map_manager_component PUBLIC PROFILE=1)
   add_executable(map_profiler 
-    src/front_end/map_manager.cpp 
-    src/front_end/stereo_handler.cpp 
-    src/front_end/rgbd_handler.cpp 
-    src/front_end/sensor_handler.cpp
-    src/front_end/visualization_utils.cpp
-    src/front_end/optical_flow.cpp 
     src/map_profiler.cpp
   )
-  target_link_libraries(map_profiler vpi)
+  target_link_libraries(map_profiler vpi map_manager_component)
   ament_target_dependencies(map_profiler ${Libraries} RTABMap cslam_common_interfaces lightglue_onnx)
   install(TARGETS map_profiler
           DESTINATION lib/${PROJECT_NAME})
 else()
-  target_compile_definitions(map_manager_component PUBLIC MMETER_ENABLE=0)
+  target_compile_definitions(map_manager_component PUBLIC PROFILE=0)
 endif()
 
 file(GENERATE

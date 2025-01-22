@@ -1,9 +1,10 @@
 #include "cslam/back_end/decentralized_pgo.h"
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
-#define MAP_FRAME_ID(id) "robot" + std::to_string(id) + "_map"
-#define CURRENT_FRAME_ID(id) "robot" + std::to_string(id) + "_current_pose"
-#define LATEST_OPTIMIZED_FRAME_ID(id) "robot" + std::to_string(id) + "_latest_optimized_pose"
+#define MAP_FRAME_ID(id) "r" + std::to_string(id) + "/map"
+#define CURRENT_FRAME_ID(id) "r" + std::to_string(id) + "/current_pose"
+#define LATEST_OPTIMIZED_FRAME_ID(id) "r" + std::to_string(id) + "/latest_optimized_pose"
+#define LATEST_LOCAL_MAP(id) "r" + std::to_string(id) + "/local_map"
 
 using namespace cslam;
 using namespace gtsam;
@@ -798,7 +799,7 @@ void DecentralizedPGO::update_transform_to_origin(const gtsam::Pose3 &pose)
   local_pose_at_latest_optimization_ = tentative_local_pose_at_latest_optimization_;
   latest_optimized_pose_ = current_pose_estimates_->at<gtsam::Pose3>(current_pose_estimates_->keys().back());
 
-  auto measurement = local_pose_at_latest_optimization_.inverse() * latest_optimized_pose_;
+  //auto measurement = local_pose_at_latest_optimization_.inverse() * latest_optimized_pose_;
   //RCLCPP_INFO(node_->get_logger(), "First - (%f, %f, %f) Pose offset - (%f, %f, %f)", origin_to_first_pose_.transform.translation.x, origin_to_first_pose_.transform.translation.y,
   //origin_to_first_pose_.transform.translation.z, measurement.x(), measurement.y(), measurement.z());
 }
@@ -812,14 +813,14 @@ void DecentralizedPGO::broadcast_tf_callback()
   // origin to local map
   std::vector<geometry_msgs::msg::TransformStamped> tfsToBroadcast;
   rclcpp::Time now = node_->get_clock()->now();
-  origin_to_first_pose_.header.stamp = now;
-  if (origin_to_first_pose_.header.frame_id !=
-      origin_to_first_pose_.child_frame_id)
-  {
-    //origin_to_first_pose_.transform = gtsam_pose_to_transform_msg(local_pose_at_latest_optimization_.inverse() * latest_optimized_pose_);
+  // origin_to_first_pose_.header.stamp = now;
+  // if (origin_to_first_pose_.header.frame_id !=
+  //     origin_to_first_pose_.child_frame_id)
+  // {
+  //   //origin_to_first_pose_.transform = gtsam_pose_to_transform_msg(local_pose_at_latest_optimization_.inverse() * latest_optimized_pose_);
 
-    tfsToBroadcast.push_back(origin_to_first_pose_);
-  } 
+  //   tfsToBroadcast.push_back(origin_to_first_pose_);
+  // } 
   
 
   geometry_msgs::msg::TransformStamped latest_optimized_pose_msg;
@@ -830,14 +831,19 @@ void DecentralizedPGO::broadcast_tf_callback()
         latest_optimized_pose_);
   tfsToBroadcast.push_back(latest_optimized_pose_msg);
 
+  geometry_msgs::msg::TransformStamped pose_offset;
+  pose_offset.header.stamp = now;
+  pose_offset.header.frame_id = LATEST_OPTIMIZED_FRAME_ID(robot_id_);
+  pose_offset.child_frame_id = LATEST_LOCAL_MAP(robot_id_);
+  pose_offset.transform = gtsam_pose_to_transform_msg(local_pose_at_latest_optimization_.inverse());
+  tfsToBroadcast.push_back(pose_offset);
+
   // latest optimized pose to latest local pose (odometry alone)
   geometry_msgs::msg::TransformStamped current_transform_msg;
   current_transform_msg.header.stamp = now;
-  current_transform_msg.header.frame_id = LATEST_OPTIMIZED_FRAME_ID(robot_id_);
+  current_transform_msg.header.frame_id = LATEST_LOCAL_MAP(robot_id_);
   current_transform_msg.child_frame_id = CURRENT_FRAME_ID(robot_id_);
-  gtsam::Pose3 current_pose_diff = local_pose_at_latest_optimization_.inverse() * latest_local_pose_;
-  current_transform_msg.transform = gtsam_pose_to_transform_msg(current_pose_diff);
-
+  current_transform_msg.transform = gtsam_pose_to_transform_msg(latest_local_pose_);
   tfsToBroadcast.push_back(current_transform_msg);
 
   tf_broadcaster_->sendTransform(tfsToBroadcast);
@@ -845,7 +851,7 @@ void DecentralizedPGO::broadcast_tf_callback()
   geometry_msgs::msg::PoseStamped pose_msg;
   pose_msg.header.stamp = now;
   pose_msg.header.frame_id = MAP_FRAME_ID(origin_robot_id_);
-  pose_msg.pose = gtsam_pose_to_msg(latest_optimized_pose_ * current_pose_diff);
+  pose_msg.pose = gtsam_pose_to_msg(latest_optimized_pose_ * local_pose_at_latest_optimization_.inverse() * latest_local_pose_);
   optimized_pose_estimate_publisher_->publish(pose_msg);
 }
 

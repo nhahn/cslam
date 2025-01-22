@@ -141,8 +141,11 @@ std::shared_ptr<rtabmap::StereoCameraModel> SensorHandler::fetchStereoModel(cons
     {
       RCLCPP_WARN(node_->get_logger(), "Odom tracking failed, skipping frame");
       if (odom->pose.covariance[0] > 9000 && process_queue_.size()) { //We've lost tracking -- reset the pose graph
-        process_queue_.clear();
-        map_id++;
+        if (resetCounter-- == 0) {
+          RCLCPP_WARN(node_->get_logger(), "Odom tracking failed, resetting...");
+          process_queue_.clear();
+          map_id++;
+        }
       }
       return;
     } 
@@ -155,7 +158,7 @@ std::shared_ptr<rtabmap::StereoCameraModel> SensorHandler::fetchStereoModel(cons
     }
 
     if (sensorData->isValid()) {
-
+      resetCounter = 4;
         process_queue_.push_back(std::make_pair(sensorData, odom));
         if (process_queue_.size() > max_queue_size_)
         {

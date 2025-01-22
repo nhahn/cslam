@@ -4,17 +4,12 @@
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(i386) || defined(__i386__) || defined(__i386) || defined(_M_IX86)
     constexpr uint32_t VPI_BACKEND = VPI_BACKEND_CUDA;
-    constexpr uint64_t image_creation_flags = VPI_BACKEND_CUDA;
     constexpr bool orin = false;
 #else 
-    constexpr uint32_t VPI_BACKEND = VPI_BACKEND_OFA | VPI_BACKEND_PVA | VPI_BACKEND_VIC;
-    constexpr uint64_t image_creation_flags = VPI_BACKEND_ALL | VPI_RESTRICT_MEM_USAGE;
+    constexpr uint32_t VPI_BACKEND = VPI_BACKEND_PVA; //VPI_BACKEND_OFA | VPI_BACKEND_PVA | VPI_BACKEND_VIC;
     constexpr bool orin = true;
 #endif
 
-
- // Max number of keypoints to be tracked
- constexpr int MAX_KEYPOINTS = 100;
   
  #define CHECK_STATUS(STMT)                                      \
      do                                                          \
@@ -39,14 +34,14 @@ OpticalFlow::OpticalFlow(int max, int level, int iterations, int window) : maxKe
     CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_U8, 0, &status));
         // Parameters we'll use. No need to change them on the fly, so just define them here.
     // We're using the default parameters.
-    CHECK_STATUS(vpiInitOpticalFlowPyrLKParams(&lkParams));
-    lkParams.epsilon = 0.01;
+    CHECK_STATUS(vpiInitOpticalFlowPyrLKParams(VPI_BACKEND, &lkParams));
+    // lkParams.epsilon = 0.01;
     lkParams.windowDimension = window;
     lkParams.numIterations = iterations;
 }
 
 void OpticalFlow::initialize(const cv::Mat &cvFrame) {
-    CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(cvFrame, VPI_IMAGE_FORMAT_Y8_ER, 0, &imgTempFrame));
+    CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(cvFrame, cvFrame.channels() > 1? VPI_IMAGE_FORMAT_BGR8 : VPI_IMAGE_FORMAT_Y8_ER, 0, &imgTempFrame));
   
     // Create grayscale image representation of input.
     CHECK_STATUS(vpiImageCreate(cvFrame.cols, cvFrame.rows, VPI_IMAGE_FORMAT_U8, 0, &imgFrame));
@@ -91,6 +86,7 @@ void updateTrackedKeypoints(const std::vector<cv::KeyPoint> &keypoints, VPIArray
      std::copy(kpt.begin(), kpt.end(), kptData);
      // update keypoint array size.
      *aosKeypoints.sizePointer = kpt.size();
+     *aosStatus.sizePointer = max;
     // std::cout << "KPs:  " << kptData[1].x << " " << kptData[1].y << std::endl;
      vpiArrayUnlock(curKeypoints);
      vpiArrayUnlock(status);
@@ -107,6 +103,7 @@ bool OpticalFlow::updateBaseFrame(const cv::Mat &base, const std::vector<cv::Key
     }
     const std::lock_guard<std::mutex> lock(inferenceLock);
     updateTrackedKeypoints(keypoints, curFeatures, status, maxKeypoints);
+    vpiArraySetSize(prevFeatures, maxKeypoints);
     // Wrap frame into a VPIImage, reusing the existing imgFrame.
     CHECK_STATUS(vpiImageSetWrappedOpenCVMat(imgTempFrame, base));
 

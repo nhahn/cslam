@@ -39,7 +39,7 @@ MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_
     ULogger::setType(ULogger::kTypeConsole);
     auto level = rtabmapLogLevel.find(get_parameter("rtabmap.log_level").as_string());
     ULogger::setLevel(level == rtabmapLogLevel.end()? ULogger::kWarning : level->second);
-
+    workerPool = std::make_shared<ThreadPool>();
     declare_parameter<int>("frontend.pnp_min_inliers", 20);
     declare_parameter<int>("frontend.min_3d_keypoints", 100);
     declare_parameter<int>("frontend.inter_pnp_min_inliers", get_parameter("frontend.pnp_min_inliers").as_int());
@@ -190,18 +190,18 @@ MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_
     // Registration settings
     auto interParams = rtabmap::ParametersMap(rtabmap_parameters);
     interParams.insert_or_assign(rtabmap::Parameters::kVisMinInliers(), std::to_string(get_parameter("frontend.inter_pnp_min_inliers").as_int()));
-    inter_registration_.parseParameters(interParams);
+    inter_registration_ = std::make_shared<rtabmap::RegistrationVis>(interParams);
 
     auto intraParams = rtabmap::ParametersMap(rtabmap_parameters);
     intraParams.insert_or_assign(rtabmap::Parameters::kVisMinInliers(), std::to_string(get_parameter("frontend.intra_pnp_min_inliers").as_int()));
-    intra_registration_.parseParameters(intraParams);
+    intra_registration_ = std::make_shared<rtabmap::RegistrationVis>(intraParams);
 
     auto f2fParams = rtabmap::ParametersMap(rtabmap_parameters);
     f2fParams.insert_or_assign(rtabmap::Parameters::kVisCorType(), "1");
     f2fParams.insert_or_assign(rtabmap::Parameters::kVisCorFlowGpu(), "true");
     f2fParams.insert_or_assign(rtabmap::Parameters::kVisCorFlowIterations(), "6");
-    f2f_registration_.parseParameters(f2fParams);
-
+    f2f_registration_ = std::make_shared<rtabmap::RegistrationVis>(f2fParams);
+    optical_matcher = std::make_shared<OpticalFlow>(600, 3, 30);
     // Intra-robot loop closure publisher
     intra_robot_loop_closure_publisher_ = create_publisher<
         cslam_common_interfaces::msg::IntraRobotLoopClosure>(
@@ -219,10 +219,10 @@ MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_
     }
 
     std::chrono::milliseconds period(map_manager_process_period_ms_);
-    auto callback_group = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    timerCB = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     process_timer_ = create_wall_timer(
         std::chrono::milliseconds(period),
-        std::bind(&MapManager::process_new_sensor_data, this));
+        std::bind(&MapManager::process_new_sensor_data, this), timerCB);
 
   RCLCPP_INFO(get_logger(), "Initialization done.");
 }
@@ -230,49 +230,47 @@ MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_
 
 
 bool MapManager::compute_local_descriptors(
-    std::shared_ptr<rtabmap::SensorData> frame_data)
+    std::shared_ptr<rtabmap::SensorData> frame_data, const cv::Mat &image)
 {
   PROFILE_ME;
-  if (frame_data->keypoints().size() > 0) 
-    return true; //We already have keypoints
+  // if (frame_data->keypoints().size() > 0) 
+  //   return true; //We already have keypoints
   // Extract local descriptors
-  frame_data->uncompressData();
-  const cv::Mat image = frame_data->imageRaw();
 
-  cv::Mat depth_mask;
-  if (!frame_data->depthRaw().empty())
-  {
-    if (image.rows % frame_data->depthRaw().rows == 0 &&
-        image.cols % frame_data->depthRaw().cols == 0 &&
-        image.rows / frame_data->depthRaw().rows ==
-            frame_data->imageRaw().cols / frame_data->depthRaw().cols)
-    {
-      depth_mask = rtabmap::util2d::interpolate(
-          frame_data->depthRaw(),
-          frame_data->imageRaw().rows / frame_data->depthRaw().rows, 0.1f);
-    }
-    else
-    {
-      UWARN("%s is true, but RGB size (%dx%d) modulo depth size (%dx%d) is "
-            "not 0. Ignoring depth mask for feature detection.",
-            rtabmap::Parameters::kVisDepthAsMask().c_str(),
-            frame_data->imageRaw().rows, frame_data->imageRaw().cols,
-            frame_data->depthRaw().rows, frame_data->depthRaw().cols);
-    }
-  }
+  // cv::Mat depth_mask;
+  // if (!frame_data->depthRaw().empty())
+  // {
+  //   if (image.rows % frame_data->depthRaw().rows == 0 &&
+  //       image.cols % frame_data->depthRaw().cols == 0 &&
+  //       image.rows / frame_data->depthRaw().rows ==
+  //           frame_data->imageRaw().cols / frame_data->depthRaw().cols)
+  //   {
+  //     depth_mask = rtabmap::util2d::interpolate(
+  //         frame_data->depthRaw(),
+  //         frame_data->imageRaw().rows / frame_data->depthRaw().rows, 0.1f);
+  //   }
+  //   else
+  //   {
+  //     UWARN("%s is true, but RGB size (%dx%d) modulo depth size (%dx%d) is "
+  //           "not 0. Ignoring depth mask for feature detection.",
+  //           rtabmap::Parameters::kVisDepthAsMask().c_str(),
+  //           frame_data->imageRaw().rows, frame_data->imageRaw().cols,
+  //           frame_data->depthRaw().rows, frame_data->depthRaw().cols);
+  //   }
+  // }
   try {
     
     auto extData = lightglueMatcher->Extractor(lightglueConfig, image);
     std::vector<cv::Point3f> kpts3D = detector_->generateKeypoints3D(*frame_data, extData.first);
     int valid3DKpts = 0;
-    for(int i = 0; i < kpts3D.size(); i++) {
+    for(size_t i = 0; i < kpts3D.size(); i++) {
       if(rtabmap::util3d::isFinite(kpts3D[i])) {
         valid3DKpts++;
       }
     }
 
     if(valid3DKpts < min_3d_keypoints_){
-      RCLCPP_DEBUG(get_logger(), "Rejecting keyframe due to the low number of 3D keypoints detected (%d/%lu) - min ", valid3DKpts, extData.first.size(), min_3d_keypoints_);
+      RCLCPP_DEBUG(get_logger(), "Rejecting keyframe due to the low number of 3D keypoints detected (%d/%lu) - min %d", valid3DKpts, extData.first.size(), min_3d_keypoints_);
       return false;
     }
     //Reduce our descriptor size here for easier storage and transmission
@@ -396,7 +394,7 @@ std::pair<std::shared_ptr<rtabmap::Signature>, std::shared_ptr<rtabmap::Signatur
     else return std::make_pair(from, to);
 }
 
-bool MapManager::generate_new_keyframe(const std::shared_ptr<rtabmap::SensorData> newData)
+bool MapManager::generate_new_keyframe(const std::shared_ptr<rtabmap::SensorData> newData, const cv::Mat &img)
 {
     PROFILE_ME;
     auto from = std::make_shared<rtabmap::Signature>(*previous_keyframe_), to = std::make_shared<rtabmap::Signature>(*newData);
@@ -411,23 +409,23 @@ bool MapManager::generate_new_keyframe(const std::shared_ptr<rtabmap::SensorData
     std::vector<cv::Point3f> kptsFrom3D = previous_keyframe_->keypoints3D();
     std::vector<cv::Point3f> kptsFrom3DKept(previous_keyframe_->keypoints3D().size());
     int ki = 0;
-    auto matches = optical_matcher.matchNextFrame(newData->imageRaw());
+    auto matches = optical_matcher->matchNextFrame(img);
     if (!matches.size()) return true;
 
     for(unsigned int i=0; i<matches.size(); ++i)
     {
       if(matches[i].first &&
-          uIsInBounds(matches[i].second.x, 0.0f, float(newData->imageRaw().cols)) &&
-          uIsInBounds(matches[i].second.y, 0.0f, float(newData->imageRaw().rows)))
+          uIsInBounds(matches[i].second.x, 0.0f, float(img.cols)) &&
+          uIsInBounds(matches[i].second.y, 0.0f, float(img.rows)))
       {
         kptsFrom[ki] = cv::KeyPoint(previous_keyframe_->keypoints()[i].pt, 1);
         kptsFrom3DKept[ki] = kptsFrom3D[i];
         kptsTo[ki++] = cv::KeyPoint(matches[i].second, 1);
       }
     }
-    // RCLCPP_WARN(
-    //   get_logger(),
-    //   "Optical flow matches: %d - from previous kf %d", ki, previous_keyframe_->id());
+    RCLCPP_DEBUG(
+      get_logger(),
+      "Optical flow matches: %d - from previous kf %d", ki, previous_keyframe_->id());
     kptsFrom.resize(ki);
     kptsTo.resize(ki);
     kptsFrom3DKept.resize(ki);
@@ -450,7 +448,7 @@ bool MapManager::generate_new_keyframe(const std::shared_ptr<rtabmap::SensorData
     {
 
         rtabmap::RegistrationInfo reg_info;
-        rtabmap::Transform t = f2f_registration_.computeTransformation(
+        rtabmap::Transform t = f2f_registration_->computeTransformation(
           *from, *to, rtabmap::Transform(), &reg_info);
       
       if (!t.isNull())
@@ -503,15 +501,14 @@ void MapManager::process_new_sensor_data()
       sensor_handler_->received_gps_queue_.pop_back();
     }
 
-
-
+    cv::Mat img = sensor_data->imageRaw();
     if (keyframe_generation_ratio_threshold_ > 0.99f || keyframe_generation_ratio_threshold_ < 0.001f || 
-        nb_local_keyframes_ <= 0 || !previous_keyframe_ || generate_new_keyframe(sensor_data)) {
-      if (compute_local_descriptors(sensor_data) && mapId == sensor_handler_->map_id) {
+        nb_local_keyframes_ <= 0 || !previous_keyframe_) {
+      if (compute_local_descriptors(sensor_data, img) && mapId == sensor_handler_->map_id) {
         bool newMap = false;
         {
-          optical_matcher.updateBaseFrame(sensor_data->imageRaw(), sensor_data->keypoints());
           const std::lock_guard<std::mutex> lock(map_mutex);                 // Set keyframe ID
+          optical_matcher->updateBaseFrame(img, sensor_data->keypoints());
           sensor_data->setId(nb_local_keyframes_);
           local_descriptors_map_.insert({sensor_data->id(), sensor_data});
           previous_keyframe_ = sensor_data;
@@ -527,6 +524,11 @@ void MapManager::process_new_sensor_data()
         }
       }
       clear_sensor_data(sensor_data);
+    } else {
+      clear_sensor_data(sensor_data);
+      if (generate_new_keyframe(sensor_data, img)) {
+        previous_keyframe_ = nullptr;
+      }
     }
     
   }
@@ -590,7 +592,7 @@ void MapManager::receive_local_keyframe_match(
       keyframe0 = local_descriptors_map_.at(msg->keyframe0_id);
       keyframe1 = local_descriptors_map_.at(msg->keyframe1_id);
     }
-     workerPool.enqueue([this, keyframe0, keyframe1, msg]() -> void {
+     workerPool->enqueue([this, keyframe0, keyframe1, msg]() -> void {
         auto signatures = this->computeMatches(keyframe0, keyframe1);
         if (signatures.first == nullptr || signatures.second == nullptr) {
           auto lc = std::make_unique<cslam_common_interfaces::msg::IntraRobotLoopClosure>();
@@ -599,7 +601,7 @@ void MapManager::receive_local_keyframe_match(
           lc->success = false;
           intra_robot_loop_closure_publisher_->publish(std::move(lc));
         } else {
-          workerPool.enqueue([this,signatures, msg]() -> void
+          workerPool->enqueue([this,signatures, msg]() -> void
           {   PROFILE_ME_AS("Intra Registration");
               auto lc = std::make_unique<cslam_common_interfaces::msg::IntraRobotLoopClosure>();
               lc->keyframe0_id = msg->keyframe0_id;
@@ -607,7 +609,7 @@ void MapManager::receive_local_keyframe_match(
               lc->success = false;
               rtabmap::RegistrationInfo reg_info;
 
-              rtabmap::Transform t = intra_registration_.computeTransformation(
+              rtabmap::Transform t = intra_registration_->computeTransformation(
                   *signatures.first, *signatures.second, rtabmap::Transform(), &reg_info);
             
               if (!t.isNull())
@@ -680,7 +682,7 @@ void MapManager::receive_local_image_descriptors(
           from = local_descriptors_map_.at(local_keyframe_id);
         }
 
-        workerPool.enqueue([this, local_keyframe_id, from, to, msg]() -> void {
+        workerPool->enqueue([this, local_keyframe_id, from, to, msg]() -> void {
             auto signatures = this->computeMatches(from, to);
             if (signatures.first == nullptr || signatures.second == nullptr) {
               auto lc = std::make_unique<cslam_common_interfaces::msg::InterRobotLoopClosure>();
@@ -691,7 +693,7 @@ void MapManager::receive_local_image_descriptors(
               lc->success = false;
               inter_robot_loop_closure_publisher_->publish(std::move(lc));
             } else {
-              workerPool.enqueue([this, msg, from, to, local_keyframe_id]() -> void
+              workerPool->enqueue([this, msg, from, to, local_keyframe_id]() -> void
                 { 
                   PROFILE_ME_AS("Inter Registration");
                   auto lc = std::make_unique<cslam_common_interfaces::msg::InterRobotLoopClosure>();
@@ -702,7 +704,7 @@ void MapManager::receive_local_image_descriptors(
                   lc->success = false;
                   rtabmap::RegistrationInfo reg_info;
 
-                  rtabmap::Transform t = inter_registration_.computeTransformation(
+                  rtabmap::Transform t = inter_registration_->computeTransformation(
                       *from, *to, rtabmap::Transform(), &reg_info);
                 
                   if (!t.isNull())
