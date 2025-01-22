@@ -10,6 +10,7 @@ from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterFile
 
 def launch_setup(context, *args, **kwargs):
+    profile = LaunchConfiguration('profile').perform(context).lower() == 'true'
     loop_detection_node = Node(package='cslam',
                                executable='loop_closure_detection_node.py',
                                name='cslam_loop_closure_detection',
@@ -26,7 +27,7 @@ def launch_setup(context, *args, **kwargs):
                                namespace=LaunchConfiguration('namespace'))
 
     map_manager_node = Node(package='cslam',
-                            executable='map_manager',
+                            executable='map_profiler' if profile else 'map_manager',
                             name='cslam_map_manager',
                             parameters=[
                                 ParameterFile(LaunchConfiguration('config').perform(context), allow_substs=True), {
@@ -88,6 +89,7 @@ def generate_launch_description():
         DeclareLaunchArgument('robot_id', default_value='0', description=''),
         DeclareLaunchArgument('tf_prefix', default_value=PythonExpression(['("', LaunchConfiguration('namespace'), '".strip("/") + "/").lstrip("/")'])),
         DeclareLaunchArgument('max_nb_robots', default_value='2', description=''),
+        DeclareLaunchArgument('profile', default_value='false', description=''),
         DeclareLaunchArgument('config_path', default_value='/config/', description=''),
         DeclareLaunchArgument('config_file', default_value='cslam_hl2_stereo.yaml', description=''),
         DeclareLaunchArgument('config',

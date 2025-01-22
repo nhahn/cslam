@@ -49,7 +49,7 @@ find_package(message_filters REQUIRED)
 find_package(class_loader REQUIRED)
 #find_package(rosgraph_msgs REQUIRED)
 find_package(image_geometry REQUIRED)
-#find_package(pluginlib REQUIRED)
+find_package(vpi REQUIRED)
 # find_package(rtabmap_ros REQUIRED)
 find_package(rtabmap_msgs REQUIRED)
 find_package(rtabmap_conversions REQUIRED)
@@ -119,7 +119,6 @@ find_package(cslam_common_interfaces REQUIRED)
 set(node_plugins "")
 
 add_library(pose_graph_manager_component SHARED
-  src/MMeter.cpp
   src/back_end/decentralized_pgo.cpp
   src/back_end/pose_graph_manager_component.cpp
   src/back_end/utils/logger.cpp
@@ -141,12 +140,13 @@ add_library(map_manager_component SHARED
   src/front_end/rgbd_handler.cpp 
   src/front_end/sensor_handler.cpp
   src/front_end/visualization_utils.cpp
-  src/MMeter.cpp
+  src/front_end/optical_flow.cpp 
 )
 target_include_directories(map_manager_component PUBLIC
   ${RTABMap_INCLUDE_DIRS}
   $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_INCLUDEDIR}>
 )
+target_link_libraries(map_manager_component vpi)
 ament_target_dependencies(map_manager_component 
   ${Libraries} RTABMap cslam_common_interfaces lightglue_onnx)
 rclcpp_components_register_node(map_manager_component PLUGIN "cslam::MapManager" EXECUTABLE map_manager EXECUTOR MultiThreadedExecutor)
@@ -195,18 +195,22 @@ install(TARGETS map_manager_component pose_graph_manager_component global_descri
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
 
-if(DEFINED PROFILE)
+option(PROFILE "Build the map manager profiler tool")
+if(PROFILE)
   target_compile_definitions(map_manager_component PUBLIC MMETER_ENABLE=1)
   add_executable(map_profiler 
+    src/front_end/map_manager.cpp 
+    src/front_end/stereo_handler.cpp 
+    src/front_end/rgbd_handler.cpp 
+    src/front_end/sensor_handler.cpp
+    src/front_end/visualization_utils.cpp
+    src/front_end/optical_flow.cpp 
     src/map_profiler.cpp
-    src/MMeter.cpp
   )
-  target_link_libraries(map_profiler map_manager_component)
+  target_link_libraries(map_profiler vpi)
   ament_target_dependencies(map_profiler ${Libraries} RTABMap cslam_common_interfaces lightglue_onnx)
   install(TARGETS map_profiler
-          ARCHIVE DESTINATION lib
-          LIBRARY DESTINATION lib
-          RUNTIME DESTINATION bin)
+          DESTINATION lib/${PROJECT_NAME})
 else()
   target_compile_definitions(map_manager_component PUBLIC MMETER_ENABLE=0)
 endif()

@@ -149,10 +149,11 @@ class GlobalDescriptorLoopClosureDetection(object):
             embedding (np.array): descriptor
             kf_id (int): keyframe ID
         """
-        # Add for matching
-        matches = self.lcm.add_local_global_descriptor(embedding, kf_id)
         # Local matching
         self.detect_intra(embedding, kf_id)
+        # Add for matching
+        matches = self.lcm.add_local_global_descriptor(embedding, kf_id)
+
         #self.node.get_logger().info("Adding KF")
         # Store global descriptor
         msg = GlobalDescriptor()

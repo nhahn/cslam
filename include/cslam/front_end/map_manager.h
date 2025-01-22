@@ -57,6 +57,7 @@
 
 #include "cslam/front_end/stereo_handler.h"
 #include "cslam/front_end/rgbd_handler.h"
+#include "cslam/front_end/utils/optical_flow.hpp"
 
 namespace cslam {
 
@@ -158,7 +159,7 @@ public:
        * @return true A new keyframe is added to the map
        * @return false The frame is rejected
        */
-      bool generate_new_keyframe(std::shared_ptr<rtabmap::Signature> from, std::shared_ptr<rtabmap::Signature> to);
+      bool generate_new_keyframe(const std::shared_ptr<rtabmap::SensorData> data);
 
       /**
        * @brief Function to send the image to the python node
@@ -166,7 +167,7 @@ public:
        * @param keypoints_data keyframe keypoints data
        * @param gps_data GPS data
        */
-      void send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data, const sensor_msgs::msg::NavSatFix * gps_data = nullptr);
+      void send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data, bool newMap = false, const sensor_msgs::msg::NavSatFix * gps_data = nullptr);
 
 
       void send_visualization(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data);
@@ -238,6 +239,7 @@ public:
 
         rtabmap::RegistrationVis inter_registration_;
         rtabmap::RegistrationVis intra_registration_;
+        rtabmap::RegistrationVis f2f_registration_;
 
         rclcpp::Publisher<
             cslam_common_interfaces::msg::InterRobotLoopClosure>::SharedPtr
@@ -255,7 +257,7 @@ public:
 
         float keyframe_generation_ratio_threshold_;
         int min_3d_keypoints_;
-
+        unsigned long currentMapId_ = 0;
         unsigned int visualization_period_ms_;
         bool enable_visualization_;
         float visualization_voxel_size_, visualization_max_range_;
@@ -265,7 +267,7 @@ public:
         rtabmap::Feature2D * detector_;
         std::shared_ptr<lightglue::LightGlueOnnxRunner> lightglueMatcher;
         lightglue::Configuration lightglueConfig;
-
+        OpticalFlow optical_matcher;
     private:
         std::shared_ptr<SensorHandler> sensor_handler_ {nullptr};
         bool setMatches(rtabmap::Signature &from, rtabmap::Signature &to);

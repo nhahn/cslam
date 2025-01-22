@@ -140,6 +140,10 @@ std::shared_ptr<rtabmap::StereoCameraModel> SensorHandler::fetchStereoModel(cons
     if (odom->pose.covariance[0] > 1000)
     {
       RCLCPP_WARN(node_->get_logger(), "Odom tracking failed, skipping frame");
+      if (odom->pose.covariance[0] > 9000 && process_queue_.size()) { //We've lost tracking -- reset the pose graph
+        process_queue_.clear();
+        map_id++;
+      }
       return;
     } 
 
@@ -157,10 +161,10 @@ std::shared_ptr<rtabmap::StereoCameraModel> SensorHandler::fetchStereoModel(cons
         {
           // Remove the oldest keyframes if we exceed the maximum size
           process_queue_.pop_front();
-          RCLCPP_DEBUG(
-              node_->get_logger(),
-              "RGBD: Maximum queue size (%d) exceeded, the oldest element was removed.",
-              max_queue_size_);
+          // RCLCPP_DEBUG(
+          //     node_->get_logger(),
+          //     "SensorHandler: Maximum queue size (%d) exceeded, the oldest element was removed.",
+          //     max_queue_size_);
         }
 
         if (enable_gps_recording_) {

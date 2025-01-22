@@ -2,10 +2,12 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/executors/single_threaded_executor.hpp>
 #include "cslam/front_end/map_manager.h"
-#include "cslam/MMeter.h"
+#include "cslam/profiler.h"
+
 
 int main(int argc, char * argv[])
 {
+  PROFILE_ME;
   rclcpp::init(argc, argv);
 
   // Create executor
@@ -19,10 +21,9 @@ int main(int argc, char * argv[])
     std::bind(&rclcpp::executors::SingleThreadedExecutor::spin,
    &executor));
   profiler.join();
-  rclcpp::shutdown();
+	PROFILE_END; // Early profile stop to finalize results for main
 
-  std::cout << std::fixed << std::setprecision(6) << MMeter::getGlobalTreePtr()->totalsByDurationStr() << std::endl;
-  std::cout << *MMeter::getGlobalTreePtr() << std::endl;
-    MMeter::getGlobalTreePtr()->outputBranchPercentagesToOStream(std::cout);
+	// std::cout << profiler::getInstance() << std::endl;
+	profiler::getInstance().print(std::cout, 60);
   return 0;
 }

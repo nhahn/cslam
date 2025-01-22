@@ -271,11 +271,11 @@ void DecentralizedPGO::odometry_callback(
     current_pose_estimates_->insert(symbol, current_estimate);
   }
 
-  if (latest_local_symbol_ != gtsam::LabeledSymbol())
+  if (latest_local_symbol_ != gtsam::LabeledSymbol() && !msg->tracking_reset)
   {
     gtsam::Pose3 odom_diff = latest_local_pose_.inverse() * current_estimate;
     gtsam::BetweenFactor<gtsam::Pose3> factor(latest_local_symbol_, symbol,
-                                              odom_diff, default_noise_model_);
+                                              odom_diff, noise);
     pose_graph_->push_back(factor);
   }
 

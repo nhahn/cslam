@@ -1,7 +1,7 @@
 #pragma once
 
 #include <rclcpp/rclcpp.hpp>
-
+#include <atomic>
 #include <rtabmap_msgs/msg/rgbd_image.hpp>
 #include <rtabmap_msgs/msg/sensor_data.hpp>
 #include <nav_msgs/msg/odometry.hpp>
@@ -55,7 +55,7 @@ namespace cslam
         std::deque<sensor_msgs::msg::NavSatFix>
             received_gps_queue_;
         std::string base_frame_id_;
-
+        std::atomic_ulong map_id{0}; 
             
         protected:
             rclcpp::Node * node_;
