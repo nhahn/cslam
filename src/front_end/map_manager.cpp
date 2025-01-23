@@ -33,18 +33,23 @@ std::map<std::string, ULogger::Level> rtabmapLogLevel =
     { "fatal", ULogger::kFatal }
 };
 
-MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_parameter_event_publisher(false).start_parameter_services(false))
+MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_parameter_event_publisher(false).start_parameter_services(false)), workerPool(3)
   {
     declare_parameter<std::string>("rtabmap.log_level", "warning");
     ULogger::setType(ULogger::kTypeConsole);
     auto level = rtabmapLogLevel.find(get_parameter("rtabmap.log_level").as_string());
     ULogger::setLevel(level == rtabmapLogLevel.end()? ULogger::kWarning : level->second);
-    workerPool = std::make_shared<ThreadPool>();
     declare_parameter<int>("frontend.pnp_min_inliers", 20);
     declare_parameter<int>("frontend.min_3d_keypoints", 100);
     declare_parameter<int>("frontend.inter_pnp_min_inliers", get_parameter("frontend.pnp_min_inliers").as_int());
     declare_parameter<int>("frontend.intra_pnp_min_inliers", get_parameter("frontend.pnp_min_inliers").as_int());
     declare_parameter<int>("frontend.max_queue_size", 10);
+    declare_parameter<int>("frontend.optFlow.maxKeypoints", 1024);
+    declare_parameter<int>("frontend.optFlow.pyrLevels", 3);
+    declare_parameter<int>("frontend.optFlow.iterations", 15);
+    declare_parameter<int>("frontend.optFlow.windowSize", 11);
+    declare_parameter<bool>("frontend.optFlow.usePVA", false);
+
     declare_parameter<int>("max_nb_robots", 1);
     declare_parameter<int>("robot_id", 0);
     declare_parameter<int>("frontend.map_manager_process_period_ms", 100);
@@ -201,7 +206,14 @@ MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_
     f2fParams.insert_or_assign(rtabmap::Parameters::kVisCorFlowGpu(), "true");
     f2fParams.insert_or_assign(rtabmap::Parameters::kVisCorFlowIterations(), "6");
     f2f_registration_ = std::make_shared<rtabmap::RegistrationVis>(f2fParams);
-    optical_matcher = std::make_shared<OpticalFlow>(600, 3, 30);
+
+    auto ofKeypoints = get_parameter("frontend.optFlow.maxKeypoints").as_int();
+    auto pyrLevels = get_parameter("frontend.optFlow.pyrLevels").as_int();
+    auto iterations = get_parameter("frontend.optFlow.iterations").as_int();
+    auto windowSize = get_parameter("frontend.optFlow.windowSize").as_int();
+    auto usePVA = get_parameter("frontend.optFlow.usePVA").as_bool();
+
+    optical_matcher = std::make_shared<OpticalFlow>(ofKeypoints, pyrLevels, iterations, windowSize, usePVA);
     // Intra-robot loop closure publisher
     intra_robot_loop_closure_publisher_ = create_publisher<
         cslam_common_interfaces::msg::IntraRobotLoopClosure>(
@@ -592,7 +604,7 @@ void MapManager::receive_local_keyframe_match(
       keyframe0 = local_descriptors_map_.at(msg->keyframe0_id);
       keyframe1 = local_descriptors_map_.at(msg->keyframe1_id);
     }
-     workerPool->enqueue([this, keyframe0, keyframe1, msg]() -> void {
+     workerPool.enqueue([this, keyframe0, keyframe1, msg]() -> void {
         auto signatures = this->computeMatches(keyframe0, keyframe1);
         if (signatures.first == nullptr || signatures.second == nullptr) {
           auto lc = std::make_unique<cslam_common_interfaces::msg::IntraRobotLoopClosure>();
@@ -601,7 +613,7 @@ void MapManager::receive_local_keyframe_match(
           lc->success = false;
           intra_robot_loop_closure_publisher_->publish(std::move(lc));
         } else {
-          workerPool->enqueue([this,signatures, msg]() -> void
+          workerPool.enqueue([this,signatures, msg]() -> void
           {   PROFILE_ME_AS("Intra Registration");
               auto lc = std::make_unique<cslam_common_interfaces::msg::IntraRobotLoopClosure>();
               lc->keyframe0_id = msg->keyframe0_id;
@@ -682,7 +694,7 @@ void MapManager::receive_local_image_descriptors(
           from = local_descriptors_map_.at(local_keyframe_id);
         }
 
-        workerPool->enqueue([this, local_keyframe_id, from, to, msg]() -> void {
+        workerPool.enqueue([this, local_keyframe_id, from, to, msg]() -> void {
             auto signatures = this->computeMatches(from, to);
             if (signatures.first == nullptr || signatures.second == nullptr) {
               auto lc = std::make_unique<cslam_common_interfaces::msg::InterRobotLoopClosure>();
@@ -693,7 +705,7 @@ void MapManager::receive_local_image_descriptors(
               lc->success = false;
               inter_robot_loop_closure_publisher_->publish(std::move(lc));
             } else {
-              workerPool->enqueue([this, msg, from, to, local_keyframe_id]() -> void
+              workerPool.enqueue([this, msg, signatures, local_keyframe_id]() -> void
                 { 
                   PROFILE_ME_AS("Inter Registration");
                   auto lc = std::make_unique<cslam_common_interfaces::msg::InterRobotLoopClosure>();
@@ -705,7 +717,7 @@ void MapManager::receive_local_image_descriptors(
                   rtabmap::RegistrationInfo reg_info;
 
                   rtabmap::Transform t = inter_registration_->computeTransformation(
-                      *from, *to, rtabmap::Transform(), &reg_info);
+                      *signatures.first, *signatures.second, rtabmap::Transform(), &reg_info);
                 
                   if (!t.isNull())
                   {

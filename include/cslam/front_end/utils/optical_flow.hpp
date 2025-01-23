@@ -20,7 +20,7 @@
 namespace cslam {
     class OpticalFlow {
         public:
-            explicit OpticalFlow(int max = 1024, int level = 3, int iterations = 30, int window = 15);
+            explicit OpticalFlow(int max = 1024, int level = 3, int iterations = 30, int window = 15, bool usePVA = false);
             ~OpticalFlow() {
                 vpiStreamDestroy(stream);
                 vpiPayloadDestroy(optflow);
@@ -49,6 +49,7 @@ namespace cslam {
             VPIPyramid pyrPrevFrame = NULL, pyrCurFrame = NULL;
             VPIArray prevFeatures = NULL, curFeatures = NULL, status = NULL;
             VPIPayload optflow = NULL;
+            uint32_t VPI_BACKEND = VPI_BACKEND_CUDA;
             bool initialized = false;
             std::mutex inferenceLock;
 

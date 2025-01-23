@@ -3,10 +3,8 @@
  #include <vpi/OpenCVInterop.hpp>
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(i386) || defined(__i386__) || defined(__i386) || defined(_M_IX86)
-    constexpr uint32_t VPI_BACKEND = VPI_BACKEND_CUDA;
     constexpr bool orin = false;
 #else 
-    constexpr uint32_t VPI_BACKEND = VPI_BACKEND_CUDA; //VPI_BACKEND_OFA | VPI_BACKEND_PVA | VPI_BACKEND_VIC;
     constexpr bool orin = true;
 #endif
 
@@ -27,11 +25,12 @@
   
 using namespace cslam;
 
-OpticalFlow::OpticalFlow(int max, int level, int iterations, int window) : maxKeypoints(max), pyrLevel(level), iters(iterations), windowSize(window) {
-    CHECK_STATUS(vpiStreamCreate(VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &stream));
-    CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_KEYPOINT_F32, VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &prevFeatures));
-    CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_KEYPOINT_F32, VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &curFeatures));
-    CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_U8, VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &status));
+OpticalFlow::OpticalFlow(int max, int level, int iterations, int window, bool usePVA) : maxKeypoints(max), pyrLevel(level), iters(iterations), windowSize(window) {
+    VPI_BACKEND = (usePVA && orin)? VPI_BACKEND_PVA : VPI_BACKEND_CUDA;
+    CHECK_STATUS(vpiStreamCreate(VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND, &stream));
+    CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_KEYPOINT_F32, VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND, &prevFeatures));
+    CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_KEYPOINT_F32, VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND, &curFeatures));
+    CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_U8, VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND, &status));
         // Parameters we'll use. No need to change them on the fly, so just define them here.
     // We're using the default parameters.
     CHECK_STATUS(vpiInitOpticalFlowPyrLKParams(VPI_BACKEND, &lkParams));
@@ -45,12 +44,12 @@ void OpticalFlow::initialize(const cv::Mat &cvFrame) {
     CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(cvFrame, cvFrame.channels() > 1? VPI_IMAGE_FORMAT_BGR8 : VPI_IMAGE_FORMAT_Y8_ER, VPI_BACKEND_CUDA, &imgTempFrame));
   
     // Create grayscale image representation of input.
-    CHECK_STATUS(vpiImageCreate(cvFrame.cols, cvFrame.rows, VPI_IMAGE_FORMAT_U8, VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &imgFrame));
+    CHECK_STATUS(vpiImageCreate(cvFrame.cols, cvFrame.rows, VPI_IMAGE_FORMAT_U8, VPI_BACKEND_CUDA | VPI_BACKEND, &imgFrame));
 
     // Create the image pyramids used by the algorithm
     CHECK_STATUS(
-        vpiPyramidCreate(cvFrame.cols, cvFrame.rows, VPI_IMAGE_FORMAT_U8, pyrLevel, 0.5, VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &pyrPrevFrame));
-    CHECK_STATUS(vpiPyramidCreate(cvFrame.cols, cvFrame.rows, VPI_IMAGE_FORMAT_U8, pyrLevel, 0.5, VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &pyrCurFrame));
+        vpiPyramidCreate(cvFrame.cols, cvFrame.rows, VPI_IMAGE_FORMAT_U8, pyrLevel, 0.5, VPI_BACKEND_CUDA | VPI_BACKEND, &pyrPrevFrame));
+    CHECK_STATUS(vpiPyramidCreate(cvFrame.cols, cvFrame.rows, VPI_IMAGE_FORMAT_U8, pyrLevel, 0.5, VPI_BACKEND_CUDA | VPI_BACKEND, &pyrCurFrame));
             // Create Optical Flow payload
     CHECK_STATUS(vpiCreateOpticalFlowPyrLK(VPI_BACKEND, cvFrame.cols, cvFrame.rows, VPI_IMAGE_FORMAT_U8, pyrLevel, 0.5,
                                     &optflow));
@@ -95,12 +94,12 @@ bool OpticalFlow::updateBaseFrame(const cv::Mat &base, const std::vector<cv::Key
         initialize(base);
     } else {
         //Reinit our arrays
-        // vpiArrayDestroy(prevFeatures);
-        // vpiArrayDestroy(curFeatures);
-        // vpiArrayDestroy(status);
-        CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_KEYPOINT_F32, VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &prevFeatures));
-        CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_KEYPOINT_F32, VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &curFeatures));
-        CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_U8, VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &status));
+        vpiArrayDestroy(prevFeatures);
+        vpiArrayDestroy(curFeatures);
+        vpiArrayDestroy(status);
+        CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_KEYPOINT_F32, VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND, &prevFeatures));
+        CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_KEYPOINT_F32, VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND, &curFeatures));
+        CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_U8, VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND, &status));
     }
 
     updateTrackedKeypoints(keypoints, curFeatures, maxKeypoints);

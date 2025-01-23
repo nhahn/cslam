@@ -276,7 +276,7 @@ public:
         rtabmap::ParametersMap rtabmap_parameters;
         sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_;
         std::mutex map_mutex, prev_frame_mutex;
-        std::shared_ptr<ThreadPool> workerPool;
+        ThreadPool workerPool;
         //ThreadPool keypointExtractorPool, matcherPool, poseEstimatorPool;
   
 
