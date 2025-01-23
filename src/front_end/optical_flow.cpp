@@ -6,7 +6,7 @@
     constexpr uint32_t VPI_BACKEND = VPI_BACKEND_CUDA;
     constexpr bool orin = false;
 #else 
-    constexpr uint32_t VPI_BACKEND = VPI_BACKEND_PVA; //VPI_BACKEND_OFA | VPI_BACKEND_PVA | VPI_BACKEND_VIC;
+    constexpr uint32_t VPI_BACKEND = VPI_BACKEND_CUDA; //VPI_BACKEND_OFA | VPI_BACKEND_PVA | VPI_BACKEND_VIC;
     constexpr bool orin = true;
 #endif
 
@@ -28,10 +28,10 @@
 using namespace cslam;
 
 OpticalFlow::OpticalFlow(int max, int level, int iterations, int window) : maxKeypoints(max), pyrLevel(level), iters(iterations), windowSize(window) {
-    CHECK_STATUS(vpiStreamCreate(0, &stream));
-    CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_KEYPOINT_F32, 0, &prevFeatures));
-    CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_KEYPOINT_F32, 0, &curFeatures));
-    CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_U8, 0, &status));
+    CHECK_STATUS(vpiStreamCreate(VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &stream));
+    CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_KEYPOINT_F32, VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &prevFeatures));
+    CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_KEYPOINT_F32, VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &curFeatures));
+    CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_U8, VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &status));
         // Parameters we'll use. No need to change them on the fly, so just define them here.
     // We're using the default parameters.
     CHECK_STATUS(vpiInitOpticalFlowPyrLKParams(VPI_BACKEND, &lkParams));
@@ -41,15 +41,15 @@ OpticalFlow::OpticalFlow(int max, int level, int iterations, int window) : maxKe
 }
 
 void OpticalFlow::initialize(const cv::Mat &cvFrame) {
-    CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(cvFrame, cvFrame.channels() > 1? VPI_IMAGE_FORMAT_BGR8 : VPI_IMAGE_FORMAT_Y8_ER, 0, &imgTempFrame));
+    CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(cvFrame, cvFrame.channels() > 1? VPI_IMAGE_FORMAT_BGR8 : VPI_IMAGE_FORMAT_Y8_ER, VPI_BACKEND_CUDA, &imgTempFrame));
   
     // Create grayscale image representation of input.
-    CHECK_STATUS(vpiImageCreate(cvFrame.cols, cvFrame.rows, VPI_IMAGE_FORMAT_U8, 0, &imgFrame));
+    CHECK_STATUS(vpiImageCreate(cvFrame.cols, cvFrame.rows, VPI_IMAGE_FORMAT_U8, VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &imgFrame));
 
     // Create the image pyramids used by the algorithm
     CHECK_STATUS(
-        vpiPyramidCreate(cvFrame.cols, cvFrame.rows, VPI_IMAGE_FORMAT_U8, pyrLevel, 0.5, 0, &pyrPrevFrame));
-    CHECK_STATUS(vpiPyramidCreate(cvFrame.cols, cvFrame.rows, VPI_IMAGE_FORMAT_U8, pyrLevel, 0.5, 0, &pyrCurFrame));
+        vpiPyramidCreate(cvFrame.cols, cvFrame.rows, VPI_IMAGE_FORMAT_U8, pyrLevel, 0.5, VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &pyrPrevFrame));
+    CHECK_STATUS(vpiPyramidCreate(cvFrame.cols, cvFrame.rows, VPI_IMAGE_FORMAT_U8, pyrLevel, 0.5, VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &pyrCurFrame));
             // Create Optical Flow payload
     CHECK_STATUS(vpiCreateOpticalFlowPyrLK(VPI_BACKEND, cvFrame.cols, cvFrame.rows, VPI_IMAGE_FORMAT_U8, pyrLevel, 0.5,
                                         &optflow));

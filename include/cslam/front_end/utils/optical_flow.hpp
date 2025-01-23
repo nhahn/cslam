@@ -20,7 +20,7 @@
 namespace cslam {
     class OpticalFlow {
         public:
-            explicit OpticalFlow(int max = 1024, int level = 3, int iterations = 6, int window = 15);
+            explicit OpticalFlow(int max = 1024, int level = 3, int iterations = 30, int window = 15);
             ~OpticalFlow() {
                 vpiStreamDestroy(stream);
                 vpiPayloadDestroy(optflow);
@@ -41,7 +41,7 @@ namespace cslam {
 
         private:
             void initialize(const cv::Mat &cvFrame);
-            int maxKeypoints = 1024, pyrLevel = 3, iters = 6, windowSize = 15;
+            int maxKeypoints = 1024, pyrLevel = 3, iters = 30, windowSize = 11;
             VPIOpticalFlowPyrLKParams lkParams;
             VPIStream stream        = NULL;
             VPIImage imgTempFrame   = NULL;
