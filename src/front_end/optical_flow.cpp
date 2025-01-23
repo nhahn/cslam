@@ -38,6 +38,7 @@ OpticalFlow::OpticalFlow(int max, int level, int iterations, int window) : maxKe
     // lkParams.epsilon = 0.01;
     lkParams.windowDimension = window;
     lkParams.numIterations = iterations;
+    lkParams.useInitialFlow = 0;
 }
 
 void OpticalFlow::initialize(const cv::Mat &cvFrame) {
@@ -52,25 +53,20 @@ void OpticalFlow::initialize(const cv::Mat &cvFrame) {
     CHECK_STATUS(vpiPyramidCreate(cvFrame.cols, cvFrame.rows, VPI_IMAGE_FORMAT_U8, pyrLevel, 0.5, VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &pyrCurFrame));
             // Create Optical Flow payload
     CHECK_STATUS(vpiCreateOpticalFlowPyrLK(VPI_BACKEND, cvFrame.cols, cvFrame.rows, VPI_IMAGE_FORMAT_U8, pyrLevel, 0.5,
-                                        &optflow));
+                                    &optflow));
     CHECK_STATUS(vpiStreamSync(stream));
     std::cout << "Initialized! " << std::endl;
     initialized = true;
 }
 
-void updateTrackedKeypoints(const std::vector<cv::KeyPoint> &keypoints, VPIArray curKeypoints, VPIArray status, int max) {
-    VPIArrayData ptsData, statusData;
+void updateTrackedKeypoints(const std::vector<cv::KeyPoint> &keypoints, VPIArray curKeypoints, int max) {
+    VPIArrayData ptsData;
     CHECK_STATUS(vpiArrayLockData(curKeypoints, VPI_LOCK_READ_WRITE, VPI_ARRAY_BUFFER_HOST_AOS, &ptsData));
-    CHECK_STATUS(vpiArrayLockData(status, VPI_LOCK_READ_WRITE, VPI_ARRAY_BUFFER_HOST_AOS, &statusData));
     VPIArrayBufferAOS &aosKeypoints = ptsData.buffer.aos;
-    VPIArrayBufferAOS &aosStatus = statusData.buffer.aos;
-    uint8_t * stat = reinterpret_cast<uint8_t *>(aosStatus.data);
-    std::fill_n(stat, max, 0);
-    
+
     // if (keypoints.size() > max) {
     //     std::sort(keypoints.begin(), keypoints.end(), [](cv::KeyPoint a, cv::KeyPoint b) { return a.response > b.response; });
     // }
-
     
      // reorder the keypoints to keep the first 'max' with highest scores.
      std::vector<VPIKeypointF32> kpt;
@@ -81,15 +77,11 @@ void updateTrackedKeypoints(const std::vector<cv::KeyPoint> &keypoints, VPIArray
         kpt.emplace_back(kp);
      }
      VPIKeypointF32 *kptData = reinterpret_cast<VPIKeypointF32 *>(aosKeypoints.data);
-
-
      std::copy(kpt.begin(), kpt.end(), kptData);
      // update keypoint array size.
      *aosKeypoints.sizePointer = kpt.size();
-     *aosStatus.sizePointer = max;
     // std::cout << "KPs:  " << kptData[1].x << " " << kptData[1].y << std::endl;
      vpiArrayUnlock(curKeypoints);
-     vpiArrayUnlock(status);
 }
 
 std::vector<std::pair<bool, cv::Point2f>> OpticalFlow::match (const cv::Mat &from, const cv::Mat &to, const std::vector<cv::KeyPoint> &keypoints) {
@@ -98,12 +90,20 @@ std::vector<std::pair<bool, cv::Point2f>> OpticalFlow::match (const cv::Mat &fro
 }
 
 bool OpticalFlow::updateBaseFrame(const cv::Mat &base, const std::vector<cv::KeyPoint> &keypoints) {
+    const std::lock_guard<std::mutex> lock(inferenceLock);
     if (!initialized) {
         initialize(base);
+    } else {
+        //Reinit our arrays
+        // vpiArrayDestroy(prevFeatures);
+        // vpiArrayDestroy(curFeatures);
+        // vpiArrayDestroy(status);
+        CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_KEYPOINT_F32, VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &prevFeatures));
+        CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_KEYPOINT_F32, VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &curFeatures));
+        CHECK_STATUS(vpiArrayCreate(maxKeypoints, VPI_ARRAY_TYPE_U8, VPI_BACKEND_CPU | VPI_BACKEND_CUDA | VPI_BACKEND_PVA, &status));
     }
-    const std::lock_guard<std::mutex> lock(inferenceLock);
-    updateTrackedKeypoints(keypoints, curFeatures, status, maxKeypoints);
-    vpiArraySetSize(prevFeatures, maxKeypoints);
+
+    updateTrackedKeypoints(keypoints, curFeatures, maxKeypoints);
     // Wrap frame into a VPIImage, reusing the existing imgFrame.
     CHECK_STATUS(vpiImageSetWrappedOpenCVMat(imgTempFrame, base));
 
