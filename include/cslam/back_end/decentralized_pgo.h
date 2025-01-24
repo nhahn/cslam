@@ -410,14 +410,14 @@ namespace cslam
         rclcpp::TimerBase::SharedPtr heartbeat_timer_, tf_broadcaster_timer_,
             visualization_timer_;
 
-        geometry_msgs::msg::TransformStamped origin_to_first_pose_;
+        geometry_msgs::msg::PoseStamped origin_to_first_pose_;
 
         bool enable_broadcast_tf_frames_;
 
-        rclcpp::Publisher<geometry_msgs::msg::TransformStamped>::SharedPtr
+        rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr
             reference_frame_per_robot_publisher_;
 
-        rclcpp::Publisher<geometry_msgs::msg::TransformStamped>::SharedPtr
+        rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr
             odom_offset_publisher_;
         std::shared_ptr<Logger> logger_;
 

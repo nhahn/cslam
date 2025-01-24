@@ -210,11 +210,11 @@ DecentralizedPGO::DecentralizedPGO(rclcpp::Node * node)
   rclcpp::PublisherOptions po;
   po.use_intra_process_comm = rclcpp::IntraProcessSetting::Disable;
   reference_frame_per_robot_publisher_ =
-      node_->create_publisher<geometry_msgs::msg::TransformStamped>(
+      node_->create_publisher<geometry_msgs::msg::PoseStamped>(
           "cslam/reference_frames", rclcpp::QoS(1).transient_local(), po);
 
   odom_offset_publisher_ =
-      node_->create_publisher<geometry_msgs::msg::TransformStamped>(
+      node_->create_publisher<geometry_msgs::msg::PoseStamped>(
           "cslam/odom_offset", rclcpp::QoS(1).transient_local(), po);
 
   origin_robot_id_ = robot_id_;
@@ -785,15 +785,14 @@ void DecentralizedPGO::update_transform_to_origin(const gtsam::Pose3 &pose)
   rclcpp::Time now = node_->get_clock()->now();
   origin_to_first_pose_.header.stamp = now;
   origin_to_first_pose_.header.frame_id = MAP_FRAME_ID(origin_robot_id_);
-  origin_to_first_pose_.child_frame_id = MAP_FRAME_ID(robot_id_);
-  origin_to_first_pose_.transform = gtsam_pose_to_transform_msg(pose);
+  origin_to_first_pose_.pose = gtsam_pose_to_msg(pose);
   //tf2::doTransform(gtsam_pose_to_transform_msg(pose), origin_to_first_pose_.transform, base_transform_);
   // Update the reference frame
   // This is the key info for many tasks since it allows conversions from
   // one robot reference frame to another.
   if (reference_frame_per_robot_publisher_->get_subscription_count() > 0)
   {
-    auto msg = std::make_unique<geometry_msgs::msg::TransformStamped>(origin_to_first_pose_);
+    auto msg = std::make_unique<geometry_msgs::msg::PoseStamped>(origin_to_first_pose_);
     reference_frame_per_robot_publisher_->publish(std::move(msg));
     //Attach the original transform for offsetting the odom link
     //msg.transforms.emplace_back(gtsam_pose_to_transform_msg(origin_to_odom));
@@ -803,11 +802,10 @@ void DecentralizedPGO::update_transform_to_origin(const gtsam::Pose3 &pose)
   local_pose_at_latest_optimization_ = tentative_local_pose_at_latest_optimization_;
   latest_optimized_pose_ = current_pose_estimates_->at<gtsam::Pose3>(current_pose_estimates_->keys().back());
 
-  auto offset_msg = std::make_unique<geometry_msgs::msg::TransformStamped>();
+  auto offset_msg = std::make_unique<geometry_msgs::msg::PoseStamped>();
   offset_msg->header.stamp = now;
   offset_msg->header.frame_id = MAP_FRAME_ID(origin_robot_id_);
-  offset_msg->child_frame_id = LATEST_LOCAL_MAP(robot_id_);
-  offset_msg->transform = gtsam_pose_to_transform_msg((latest_optimized_pose_ * local_pose_at_latest_optimization_.inverse()).inverse());
+  offset_msg->pose = gtsam_pose_to_msg((latest_optimized_pose_ * local_pose_at_latest_optimization_.inverse()).inverse());
   odom_offset_publisher_->publish(std::move(offset_msg));
   //auto measurement = local_pose_at_latest_optimization_.inverse() * latest_optimized_pose_;
   //RCLCPP_INFO(node_->get_logger(), "First - (%f, %f, %f) Pose offset - (%f, %f, %f)", origin_to_first_pose_.transform.translation.x, origin_to_first_pose_.transform.translation.y,
