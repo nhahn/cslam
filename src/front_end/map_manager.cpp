@@ -234,7 +234,7 @@ MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_
     timerCB = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     process_timer_ = create_wall_timer(
         std::chrono::milliseconds(period),
-        std::bind(&MapManager::process_new_sensor_data, this), timerCB);
+        std::bind(&MapManager::process_new_sensor_data, this));
 
   RCLCPP_INFO(get_logger(), "Initialization done.");
 }
@@ -535,13 +535,12 @@ void MapManager::process_new_sensor_data()
           send_keyframe(std::make_pair(sensor_data, odom), newMap, nullptr);
         }
       }
-      clear_sensor_data(sensor_data);
     } else {
-      clear_sensor_data(sensor_data);
       if (generate_new_keyframe(sensor_data, img)) {
         previous_keyframe_ = nullptr;
       }
     }
+    clear_sensor_data(sensor_data);
     
   }
 
@@ -613,7 +612,7 @@ void MapManager::receive_local_keyframe_match(
           lc->success = false;
           intra_robot_loop_closure_publisher_->publish(std::move(lc));
         } else {
-          workerPool.enqueue([this,signatures, msg]() -> void
+          workerPool.enqueue([this, signatures, msg]() -> void
           {   PROFILE_ME_AS("Intra Registration");
               auto lc = std::make_unique<cslam_common_interfaces::msg::IntraRobotLoopClosure>();
               lc->keyframe0_id = msg->keyframe0_id;
@@ -728,7 +727,7 @@ void MapManager::receive_local_image_descriptors(
                   }
                   else
                   {
-                    RCLCPP_DEBUG(
+                    RCLCPP_INFO(
                         get_logger(),
                         "Inter-robot loop closure failed between (%d,%d) and (%d,%d): %s",
                         lc->robot0_id, lc->robot0_keyframe_id, lc->robot1_id, lc->robot1_keyframe_id,
@@ -766,7 +765,7 @@ void MapManager::send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorDa
   // Image message
   std_msgs::msg::Header header;
   header.stamp = keypoints_data.second->header.stamp;
-  cv_bridge::CvImage image_bridge = cv_bridge::CvImage(header, img.channels() > 1? "bgr8":"mono8", img);
+  cv_bridge::CvImage image_bridge = cv_bridge::CvImage(header, img.channels() > 1? "bgr8":"mono8",img);
   auto keyframe_msg = std::make_unique<cslam_common_interfaces::msg::KeyframeRGB>();
   image_bridge.toImageMsg(keyframe_msg->image);
   keyframe_msg->id = keypoints_data.first->id();

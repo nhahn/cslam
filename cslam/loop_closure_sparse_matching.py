@@ -69,7 +69,7 @@ class LoopClosureSparseMatching(object):
         kf, similarity = self.local_nnsm.search_best(tensor)
         if kf is not None:
             if similarity >= self.params['frontend.similarity_threshold']:
-                self.node.get_logger().info(f"Found potential matching KF: ({kf},{msg.keyframe_id}): {similarity}")    
+                self.node.get_logger().debug(f"Found potential matching KF: ({kf},{msg.keyframe_id}): {similarity}")    
                 match = EdgeInterRobot(self.params['robot_id'], kf, msg.robot_id,
                                    msg.keyframe_id, similarity)
                 self.candidate_selector.add_match(match)

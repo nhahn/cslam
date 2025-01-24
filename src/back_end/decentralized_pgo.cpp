@@ -213,6 +213,10 @@ DecentralizedPGO::DecentralizedPGO(rclcpp::Node * node)
       node_->create_publisher<geometry_msgs::msg::TransformStamped>(
           "cslam/reference_frames", rclcpp::QoS(1).transient_local(), po);
 
+  odom_offset_publisher_ =
+      node_->create_publisher<geometry_msgs::msg::TransformStamped>(
+          "cslam/odom_offset", rclcpp::QoS(1).transient_local(), po);
+
   origin_robot_id_ = robot_id_;
 
   if (enable_logs_)
@@ -799,6 +803,12 @@ void DecentralizedPGO::update_transform_to_origin(const gtsam::Pose3 &pose)
   local_pose_at_latest_optimization_ = tentative_local_pose_at_latest_optimization_;
   latest_optimized_pose_ = current_pose_estimates_->at<gtsam::Pose3>(current_pose_estimates_->keys().back());
 
+  auto offset_msg = std::make_unique<geometry_msgs::msg::TransformStamped>();
+  offset_msg->header.stamp = now;
+  offset_msg->header.frame_id = MAP_FRAME_ID(origin_robot_id_);
+  offset_msg->child_frame_id = LATEST_LOCAL_MAP(robot_id_);
+  offset_msg->transform = gtsam_pose_to_transform_msg((latest_optimized_pose_ * local_pose_at_latest_optimization_.inverse()).inverse());
+  odom_offset_publisher_->publish(std::move(offset_msg));
   //auto measurement = local_pose_at_latest_optimization_.inverse() * latest_optimized_pose_;
   //RCLCPP_INFO(node_->get_logger(), "First - (%f, %f, %f) Pose offset - (%f, %f, %f)", origin_to_first_pose_.transform.translation.x, origin_to_first_pose_.transform.translation.y,
   //origin_to_first_pose_.transform.translation.z, measurement.x(), measurement.y(), measurement.z());

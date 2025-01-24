@@ -417,6 +417,8 @@ namespace cslam
         rclcpp::Publisher<geometry_msgs::msg::TransformStamped>::SharedPtr
             reference_frame_per_robot_publisher_;
 
+        rclcpp::Publisher<geometry_msgs::msg::TransformStamped>::SharedPtr
+            odom_offset_publisher_;
         std::shared_ptr<Logger> logger_;
 
         std::map<unsigned int, sensor_msgs::msg::NavSatFix> gps_data_;
