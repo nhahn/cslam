@@ -805,7 +805,7 @@ void DecentralizedPGO::update_transform_to_origin(const gtsam::Pose3 &pose)
   auto offset_msg = std::make_unique<geometry_msgs::msg::PoseStamped>();
   offset_msg->header.stamp = now;
   offset_msg->header.frame_id = MAP_FRAME_ID(origin_robot_id_);
-  offset_msg->pose = gtsam_pose_to_msg((latest_optimized_pose_ * local_pose_at_latest_optimization_.inverse()).inverse());
+  offset_msg->pose = gtsam_pose_to_msg(latest_optimized_pose_ * local_pose_at_latest_optimization_.inverse());
   odom_offset_publisher_->publish(std::move(offset_msg));
   //auto measurement = local_pose_at_latest_optimization_.inverse() * latest_optimized_pose_;
   //RCLCPP_INFO(node_->get_logger(), "First - (%f, %f, %f) Pose offset - (%f, %f, %f)", origin_to_first_pose_.transform.translation.x, origin_to_first_pose_.transform.translation.y,
