@@ -49,7 +49,10 @@ MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_
     declare_parameter<int>("frontend.optFlow.iterations", 15);
     declare_parameter<int>("frontend.optFlow.windowSize", 11);
     declare_parameter<bool>("frontend.optFlow.usePVA", false);
-
+    declare_parameter<std::string>("tf_prefix", "");
+    declare_parameter<std::string>("frontend.base_frame", "base_link");
+    declare_parameter<std::string>("frontend.odom_frame", "odom");
+    declare_parameter<std::string>("tf_prefix", "");
     declare_parameter<int>("max_nb_robots", 1);
     declare_parameter<int>("robot_id", 0);
     declare_parameter<int>("frontend.map_manager_process_period_ms", 100);
@@ -72,7 +75,6 @@ MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_
 
     get_parameter("frontend.sensor_type", sensor_type);
     auto sync_type = get_parameter("frontend.sync_method").as_string();
-    
     if (sensor_type == "stereo") {
       if (sync_type == "exact")
         sensor_handler_ = std::make_shared<StereoHandler<ExactStereoSync>>(this);
@@ -142,11 +144,14 @@ MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_
      odom_publisher_ = create_publisher<nav_msgs::msg::Odometry>(get_parameter("frontend.odom_topic").as_string(), 5);
      recovery_subscriber_ = create_subscription<cslam_common_interfaces::msg::LocalKeyframeMatch>("cslam/odom_recovery", 1, std::bind(&MapManager::recover_odom_pose, this, std::placeholders::_1));
      add_recovered_publisher_ = create_publisher<cslam_common_interfaces::msg::LocalKeyframeMatch>("cslam/add_recovered_pose", 5);
+     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(this);
+     
     }
 
-    calcOdom.header.frame_id = "odom";
-    calcOdom.child_frame_id = "base_link";
-
+    calcOdom.header.frame_id = get_parameter("tf_prefix").as_string() + get_parameter("frontend.odom_frame").as_string();
+    calcOdom.child_frame_id = get_parameter("tf_prefix").as_string() + get_parameter("frontend.base_frame").as_string();
+    odomTf.header.frame_id = calcOdom.header.frame_id;
+    odomTf.child_frame_id = calcOdom.child_frame_id;
     // Service to extract and publish local image descriptors to another robot
     rclcpp::SubscriptionOptions descriptorOptions;
     descriptorOptions.callback_group = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -520,9 +525,12 @@ void MapManager::process_new_sensor_data()
         if (!external_odom_ && !trackingLost) {
             reg_info.covariance.reshape(1,1).copyTo(calcOdom.pose.covariance);
             rtabmap_conversions::transformToPoseMsg(newPose, calcOdom.pose.pose);
+            rtabmap_conversions::transformToGeometryMsg(newPose, odomTf.transform);
             calcOdom.header.stamp = rtabmap_conversions::timestampToROS(sensor_data->stamp());
+            odomTf.header.stamp = calcOdom.header.stamp;
             odom = std::make_shared<const nav_msgs::msg::Odometry>(calcOdom);
             odom_publisher_->publish(calcOdom);
+            tf_broadcaster_->sendTransform(odomTf);
             sensor_data->setGlobalPose(newPose, reg_info.covariance);
         }
         RCLCPP_DEBUG(get_logger(), "New pose from internal tracking: %s", newPose.prettyPrint().c_str());

@@ -47,6 +47,8 @@
 #include <functional>
 #include <nav_msgs/msg/odometry.hpp>
 #include <thread>
+#include <tf2_ros/transform_broadcaster.h>
+#include <geometry_msgs/msg/transform_stamped.hpp>
 
 #include <memory>
 
@@ -207,6 +209,7 @@ public:
         rclcpp::TimerBase::SharedPtr process_timer_;
         std::shared_ptr<rtabmap::SensorData> previous_keyframe_;
         std::string sensor_type;
+        std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
         rtabmap::Transform lastKFPose;
         bool trackingLost = false;
@@ -277,6 +280,8 @@ public:
         std::shared_ptr<OpticalFlow> optical_matcher;
     private:
         nav_msgs::msg::Odometry calcOdom;
+        geometry_msgs::msg::TransformStamped odomTf;
+        
         rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
         std::shared_ptr<SensorHandler> sensor_handler_ {nullptr};
         rclcpp::CallbackGroup::SharedPtr timerCB;
