@@ -14,17 +14,25 @@ SensorHandler::SensorHandler(rclcpp::Node * node) : node_(node) {
                         gps_topic_);
   node->get_parameter("frontend.sensor_base_frame_id", base_frame_id_);
   node_->declare_parameter<float>("frontend.sync_period", 0.2);
+  node->declare_parameter<std::string>("frontend.odom_topic", "odom");
+  node->get_parameter("frontend.use_external_odom", external_odom_);
 
-  sub_odometry_.subscribe(node,
-                          node->get_parameter("frontend.odom_topic").as_string(),
-                          qos);
+  if (external_odom_) {
+    sub_odometry_.subscribe(node,
+                            node->get_parameter("frontend.odom_topic").as_string(),
+                            qos);
 
 
-    message_filters::NullFilter<rtabmap_msgs::msg::SensorData> f0;
-    sensor_queue_ = std::make_unique<message_filters::Synchronizer<SensorSyncPolicy>>(
-        SensorSyncPolicy(max_queue_size_), f0, sub_odometry_);
-    sensor_queue_->registerCallback(std::bind(&SensorHandler::sensor_odom_callback, this, std::placeholders::_1,
-        std::placeholders::_2));
+      sensor_synchronizer_ = std::make_unique<message_filters::Synchronizer<SensorSyncPolicy>>(
+          SensorSyncPolicy(max_queue_size_), imagery_queue_, sub_odometry_);
+      sensor_synchronizer_->registerCallback(std::bind(&SensorHandler::sensor_odom_callback, this, std::placeholders::_1,
+          std::placeholders::_2));
+  } else {
+    imagery_queue_.registerCallback([this](const rtabmap_msgs::msg::SensorData::ConstSharedPtr sensorMsg) {
+      this->sensor_odom_callback(sensorMsg, nullptr);
+    });
+  }
+
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
       
@@ -46,6 +54,7 @@ SensorHandler::SensorHandler(rclcpp::Node * node) : node_(node) {
 std::shared_ptr<rtabmap::StereoCameraModel> SensorHandler::fetchStereoModel(const rtabmap_msgs::msg::SensorData::ConstSharedPtr sensorMsg) {
   if (!stereoCameraModel) {
       rtabmap::Transform stereoTransform;
+      rtabmap::Transform localTransform = rtabmap_conversions::transformFromGeometryMsg(sensorMsg->local_transform[0]);
       if (!alreadyRectified) {
         stereoTransform = rtabmap_conversions::getTransform(
             sensorMsg->right_camera_info[0].header.frame_id, sensorMsg->left_camera_info[0].header.frame_id,
@@ -70,7 +79,7 @@ std::shared_ptr<rtabmap::StereoCameraModel> SensorHandler::fetchStereoModel(cons
         }
       }
       stereoCameraModel = std::make_shared<rtabmap::StereoCameraModel>(rtabmap_conversions::stereoCameraModelFromROS(sensorMsg->left_camera_info[0], sensorMsg->right_camera_info[0],
-                                                Transform::getIdentity(), stereoTransform));
+                                                localTransform, stereoTransform));
       if (stereoCameraModel->baseline() == 0 && alreadyRectified) {
         stereoTransform = rtabmap_conversions::getTransform(
             sensorMsg->left_camera_info[0].header.frame_id, sensorMsg->right_camera_info[0].header.frame_id,
@@ -137,7 +146,7 @@ std::shared_ptr<rtabmap::StereoCameraModel> SensorHandler::fetchStereoModel(cons
         const rtabmap_msgs::msg::SensorData::ConstSharedPtr sensorMsg, 
         const nav_msgs::msg::Odometry::ConstSharedPtr odom){
           // If odom tracking failed, do not process the frame
-    if (odom->pose.covariance[0] > 1000)
+    if (odom && odom->pose.covariance[0] > 1000)
     {
       RCLCPP_WARN(node_->get_logger(), "Odom tracking failed, skipping frame");
       // if (odom->pose.covariance[0] > 9000 && process_queue_.size()) { //We've lost tracking -- reset the pose graph

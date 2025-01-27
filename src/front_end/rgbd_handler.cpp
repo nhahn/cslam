@@ -7,6 +7,7 @@ using namespace cslam;
 template class cslam::RGBDHandler<ApproximateRGBDSync>;
 template class cslam::RGBDHandler<ExactRGBDSync>;
 
+
 template<typename SyncPolicy>
 RGBDHandler<SyncPolicy>::RGBDHandler(rclcpp::Node * node) : SensorHandler(node) 
 {
@@ -70,9 +71,11 @@ void RGBDHandler<SyncPolicy>::rgbd_callback(
         return;
       }
   } else {
-    sensor_data->local_transform.push_back(geometry_msgs::msg::Transform());
+    geometry_msgs::msg::Transform optTransform;
+    rtabmap_conversions::transformToGeometryMsg(rtabmap::CameraModel::opticalRotation(), optTransform);
+    sensor_data->local_transform.push_back(optTransform);
   }
 
-  sensor_queue_->add<0>(sensor_data);
+  imagery_queue_.add(sensor_data);
 
 }

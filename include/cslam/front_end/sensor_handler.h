@@ -19,7 +19,7 @@
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 
-#include <message_filters/cache.h>
+#include <message_filters/pass_through.h>
 
 #include <image_transport/image_transport.hpp>
 #include <image_transport/subscriber_filter.hpp>
@@ -46,10 +46,10 @@ namespace cslam
         typedef message_filters::sync_policies::ApproximateTime<
             rtabmap_msgs::msg::SensorData, nav_msgs::msg::Odometry>
             SensorSyncPolicy;
-        std::unique_ptr<message_filters::Synchronizer<SensorSyncPolicy>> sensor_queue_;
-
+        std::unique_ptr<message_filters::Synchronizer<SensorSyncPolicy>> sensor_synchronizer_;
+        message_filters::PassThrough<rtabmap_msgs::msg::SensorData> imagery_queue_;
         std::deque<std::pair<std::shared_ptr<rtabmap::SensorData>, nav_msgs::msg::Odometry::ConstSharedPtr>> process_queue_;
-        bool enable_gps_recording_;
+        bool enable_gps_recording_, external_odom_;
         std::string gps_topic_;
         sensor_msgs::msg::NavSatFix latest_gps_fix_;
         std::deque<sensor_msgs::msg::NavSatFix>

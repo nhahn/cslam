@@ -61,10 +61,10 @@ MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_
     declare_parameter<float>("visualization.max_range", 2.0);
     declare_parameter<bool>("evaluation.enable_gps_recording", false);
     declare_parameter<std::string>("evaluation.gps_topic", "");
+    declare_parameter<bool>("frontend.use_external_odom", true);
 
     declare_parameter<std::string>("frontend.superpoint_model", "/models/superpoint_1024.onnx");
     declare_parameter<std::string>("frontend.lightglue_model", "/models/superpoint_lightglue_1024.onnx");
-    declare_parameter<std::string>("frontend.odom_topic", "odom");
     declare_parameter<float>("frontend.keyframe_generation_ratio_threshold", 0.0);
     declare_parameter<std::string>("frontend.sensor_base_frame_id", ""); // If empty we assume that the camera link is the base link
     declare_parameter<bool>("evaluation.enable_logs", false);
@@ -137,6 +137,15 @@ MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_
     lightglueConfig.extractorUseTrt = true;
 
     nb_local_keyframes_ = 0;
+    get_parameter("frontend.use_external_odom", external_odom_);
+    if (!external_odom_) {
+     odom_publisher_ = create_publisher<nav_msgs::msg::Odometry>(get_parameter("frontend.odom_topic").as_string(), 5);
+     recovery_subscriber_ = create_subscription<cslam_common_interfaces::msg::LocalKeyframeMatch>("cslam/odom_recovery", 1, std::bind(&MapManager::recover_odom_pose, this, std::placeholders::_1));
+     add_recovered_publisher_ = create_publisher<cslam_common_interfaces::msg::LocalKeyframeMatch>("cslam/add_recovered_pose", 5);
+    }
+
+    calcOdom.header.frame_id = "odom";
+    calcOdom.child_frame_id = "base_link";
 
     // Service to extract and publish local image descriptors to another robot
     rclcpp::SubscriptionOptions descriptorOptions;
@@ -202,9 +211,11 @@ MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_
     intra_registration_ = std::make_shared<rtabmap::RegistrationVis>(intraParams);
 
     auto f2fParams = rtabmap::ParametersMap(rtabmap_parameters);
+    f2fParams.insert_or_assign(rtabmap::Parameters::kVisMinInliers(), "60");
     f2fParams.insert_or_assign(rtabmap::Parameters::kVisCorType(), "1");
     f2fParams.insert_or_assign(rtabmap::Parameters::kVisCorFlowGpu(), "true");
     f2fParams.insert_or_assign(rtabmap::Parameters::kVisCorFlowIterations(), "6");
+    f2fParams.insert_or_assign(rtabmap::Parameters::kVisPnPRefineIterations(), "1");
     f2f_registration_ = std::make_shared<rtabmap::RegistrationVis>(f2fParams);
 
     auto ofKeypoints = get_parameter("frontend.optFlow.maxKeypoints").as_int();
@@ -236,13 +247,15 @@ MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_
         std::chrono::milliseconds(period),
         std::bind(&MapManager::process_new_sensor_data, this));
 
+    lastKFPose.setIdentity();
+
   RCLCPP_INFO(get_logger(), "Initialization done.");
 }
 
 
 
 bool MapManager::compute_local_descriptors(
-    std::shared_ptr<rtabmap::SensorData> frame_data, const cv::Mat &image)
+    std::shared_ptr<rtabmap::SensorData> frame_data)
 {
   PROFILE_ME;
   // if (frame_data->keypoints().size() > 0) 
@@ -272,7 +285,7 @@ bool MapManager::compute_local_descriptors(
   // }
   try {
     
-    auto extData = lightglueMatcher->Extractor(lightglueConfig, image);
+    auto extData = lightglueMatcher->Extractor(lightglueConfig, frame_data->imageRaw());
     std::vector<cv::Point3f> kpts3D = detector_->generateKeypoints3D(*frame_data, extData.first);
     int valid3DKpts = 0;
     for(size_t i = 0; i < kpts3D.size(); i++) {
@@ -396,17 +409,17 @@ bool MapManager::setMatches(rtabmap::Signature &from, rtabmap::Signature &to) {
     return true;
 }
 
-std::pair<std::shared_ptr<rtabmap::Signature>, std::shared_ptr<rtabmap::Signature>> MapManager::computeMatches(std::shared_ptr<rtabmap::SensorData> k1, std::shared_ptr<rtabmap::SensorData> k2) {
+std::pair<std::shared_ptr<rtabmap::Signature>, std::shared_ptr<rtabmap::Signature>> MapManager::computeMatches(const rtabmap::SensorData& k1, const rtabmap::SensorData& k2) {
     PROFILE_ME;
 
-    auto from = std::make_shared<rtabmap::Signature>(*k1), to = std::make_shared<rtabmap::Signature>(*k2);
+    auto from = std::make_shared<rtabmap::Signature>(k1), to = std::make_shared<rtabmap::Signature>(k2);
     bool hasMaches = setMatches(*from, *to);
     if (!hasMaches)
       return std::pair<std::shared_ptr<rtabmap::Signature>, std::shared_ptr<rtabmap::Signature>>(nullptr, nullptr);
     else return std::make_pair(from, to);
 }
 
-bool MapManager::generate_new_keyframe(const std::shared_ptr<rtabmap::SensorData> newData, const cv::Mat &img)
+rtabmap::Transform MapManager::compute_flow(const std::shared_ptr<rtabmap::SensorData> newData, rtabmap::RegistrationInfo &reg_info)
 {
     PROFILE_ME;
     auto from = std::make_shared<rtabmap::Signature>(*previous_keyframe_), to = std::make_shared<rtabmap::Signature>(*newData);
@@ -421,14 +434,14 @@ bool MapManager::generate_new_keyframe(const std::shared_ptr<rtabmap::SensorData
     std::vector<cv::Point3f> kptsFrom3D = previous_keyframe_->keypoints3D();
     std::vector<cv::Point3f> kptsFrom3DKept(previous_keyframe_->keypoints3D().size());
     int ki = 0;
-    auto matches = optical_matcher->matchNextFrame(img);
-    if (!matches.size()) return true;
+    auto matches = optical_matcher->matchNextFrame(to->sensorData().imageRaw().clone());
+    if (!matches.size()) return rtabmap::Transform();
 
     for(unsigned int i=0; i<matches.size(); ++i)
     {
       if(matches[i].first &&
-          uIsInBounds(matches[i].second.x, 0.0f, float(img.cols)) &&
-          uIsInBounds(matches[i].second.y, 0.0f, float(img.rows)))
+          uIsInBounds(matches[i].second.x, 0.0f, float(to->sensorData().imageRaw().cols)) &&
+          uIsInBounds(matches[i].second.y, 0.0f, float(to->sensorData().imageRaw().rows)))
       {
         kptsFrom[ki] = cv::KeyPoint(previous_keyframe_->keypoints()[i].pt, 1);
         kptsFrom3DKept[ki] = kptsFrom3D[i];
@@ -458,23 +471,8 @@ bool MapManager::generate_new_keyframe(const std::shared_ptr<rtabmap::SensorData
     to->setWords(wordsTo, wordsKptsTo, words3To, cv::Mat());
     try
     {
-
-        rtabmap::RegistrationInfo reg_info;
-        rtabmap::Transform t = f2f_registration_->computeTransformation(
+        return f2f_registration_->computeTransformation(
           *from, *to, rtabmap::Transform(), &reg_info);
-      
-      if (!t.isNull())
-      {
-        if (reg_info.inliersRatio > keyframe_generation_ratio_threshold_ )
-        {
-          RCLCPP_DEBUG(get_logger(), "New KF not generated due to high number of inliers from pervious KF %d %f", reg_info.inliers,
-                          reg_info.inliersRatio);
-          return false;
-        }
-        RCLCPP_DEBUG(get_logger(), "New KF generated - %d %f", reg_info.inliers, reg_info.inliersRatio);
-      } else {
-        RCLCPP_DEBUG(get_logger(), "Couldnt compute transform: inliers %d - ratio %f - matches %d", reg_info.inliers, reg_info.inliersRatio, reg_info.matches);
-      }
     }
     catch (std::exception &e)
     {
@@ -483,7 +481,7 @@ bool MapManager::generate_new_keyframe(const std::shared_ptr<rtabmap::SensorData
           "Exception: Could not compute transformation for keyframe generation: %s -- from words %lu words3 %lu : to words %lu words3 %lu",
           e.what(), from->getWords().size(), from->getWords3().size(), to->getWords().size(), to->getWords3().size());
     }
-    return true;
+    return rtabmap::Transform();
   }
 
 
@@ -492,7 +490,6 @@ void MapManager::process_new_sensor_data()
   PROFILE_ME;
   if (!sensor_handler_->process_queue_.empty())
   {
-    unsigned long mapId = sensor_handler_->map_id;
     auto odom = sensor_handler_->process_queue_.front().second;
     auto sensor_data = sensor_handler_->process_queue_.front().first;
     sensor_handler_->process_queue_.pop_front();
@@ -512,36 +509,65 @@ void MapManager::process_new_sensor_data()
       gps_fix = std::make_shared<sensor_msgs::msg::NavSatFix>(sensor_handler_->received_gps_queue_.back());
       sensor_handler_->received_gps_queue_.pop_back();
     }
-
-    cv::Mat img = sensor_data->imageRaw();
-    if (keyframe_generation_ratio_threshold_ > 0.99f || keyframe_generation_ratio_threshold_ < 0.001f || 
-        nb_local_keyframes_ <= 0 || !previous_keyframe_) {
-      if (compute_local_descriptors(sensor_data, img) && mapId == sensor_handler_->map_id) {
-        bool newMap = false;
+    const std::lock_guard<std::mutex> lock(current_pose_mutex);
+    if (keyframe_generation_ratio_threshold_ < 0.99f && keyframe_generation_ratio_threshold_ > 0.001f && 
+        nb_local_keyframes_ > 0 && previous_keyframe_) {
+      rtabmap::RegistrationInfo reg_info;
+      auto t = compute_flow(sensor_data, reg_info);
+      if (!t.isNull())
+      {
+        auto newPose = lastKFPose * t;
+        if (!external_odom_ && !trackingLost) {
+            reg_info.covariance.reshape(1,1).copyTo(calcOdom.pose.covariance);
+            rtabmap_conversions::transformToPoseMsg(newPose, calcOdom.pose.pose);
+            calcOdom.header.stamp = rtabmap_conversions::timestampToROS(sensor_data->stamp());
+            odom = std::make_shared<const nav_msgs::msg::Odometry>(calcOdom);
+            odom_publisher_->publish(calcOdom);
+            sensor_data->setGlobalPose(newPose, reg_info.covariance);
+        }
+        RCLCPP_DEBUG(get_logger(), "New pose from internal tracking: %s", newPose.prettyPrint().c_str());
+        float inliersRatio = (float) reg_info.inliers / (float) previous_keyframe_->keypoints().size();
+        if ( inliersRatio > keyframe_generation_ratio_threshold_ )
         {
-          const std::lock_guard<std::mutex> lock(map_mutex);                 // Set keyframe ID
-          optical_matcher->updateBaseFrame(img, sensor_data->keypoints());
+          RCLCPP_DEBUG(get_logger(), "New KF not generated due to high number of inliers from pervious KF %d %f", reg_info.inliers,
+                          inliersRatio);
+          return;
+        }
+        RCLCPP_DEBUG(get_logger(), "New KF to be generated - %d %f", reg_info.inliers, inliersRatio);
+        lastKFPose = newPose;
+      } else {
+        RCLCPP_DEBUG(get_logger(), "Couldnt compute f2f transform: inliers %d - ratio %f - matches %d", reg_info.inliers, reg_info.inliersRatio, reg_info.matches);
+        previous_keyframe_ = nullptr;
+        lastKFPose.setIdentity();
+        trackingLost = !external_odom_;
+      }
+    } else if (!external_odom_ && nb_local_keyframes_ == 0) {
+      calcOdom.header.stamp = rtabmap_conversions::timestampToROS(sensor_data->stamp());
+      odom = std::make_shared<const nav_msgs::msg::Odometry>(calcOdom);
+    }
+    cv::Mat img = sensor_data->imageRaw();
+    if (compute_local_descriptors(sensor_data)) {
+      {
+        const std::lock_guard<std::mutex> lock(map_mutex);                 // Set keyframe ID
+        optical_matcher->updateBaseFrame(img, sensor_data->keypoints());
+        previous_keyframe_ = sensor_data;
+        if (!trackingLost) {
           sensor_data->setId(nb_local_keyframes_);
           local_descriptors_map_.insert({sensor_data->id(), sensor_data});
-          previous_keyframe_ = sensor_data;
-          newMap = mapId != currentMapId_;
-          currentMapId_ = mapId;
           nb_local_keyframes_++;
-        }
-        if (sensor_handler_->enable_gps_recording_) {
-          send_keyframe(std::make_pair(sensor_data, odom), newMap, gps_fix.get());
         } else {
-          // Send keyframe for loop detection
-          send_keyframe(std::make_pair(sensor_data, odom), newMap, nullptr);
+          sensor_data->setId(0);
         }
       }
-    } else {
-      if (generate_new_keyframe(sensor_data, img)) {
-        previous_keyframe_ = nullptr;
+      if (sensor_handler_->enable_gps_recording_) {
+        send_keyframe(std::make_pair(sensor_data, trackingLost? nullptr : odom), gps_fix.get());
+      } else {
+        // Send keyframe for loop detection
+        send_keyframe(std::make_pair(sensor_data, trackingLost? nullptr : odom), nullptr);
       }
+      
     }
     clear_sensor_data(sensor_data);
-    
   }
 
 }
@@ -589,22 +615,61 @@ void MapManager::local_descriptors_request(
   }
 }
 
+void MapManager::recover_odom_pose(cslam_common_interfaces::msg::LocalKeyframeMatch::ConstSharedPtr match) {
+  const std::lock_guard<std::mutex> pose_lock(current_pose_mutex);
+  if (!trackingLost) return;
+
+  std::shared_ptr<rtabmap::SensorData> matching_kf = local_descriptors_map_.at(match->keyframe0_id);
+  auto signatures = this->computeMatches(*matching_kf, *previous_keyframe_);
+  rtabmap::RegistrationInfo reg_info;
+  rtabmap::Transform t = f2f_registration_->computeTransformation(
+              *signatures.first, *signatures.second, rtabmap::Transform(), &reg_info);
+
+  if (!t.isNull()) {
+    //TODO be smarter about this -- we should be able to reuse the new map we're constructing
+    auto newKFPose = matching_kf->globalPose() * t;
+    {
+      const std::lock_guard<std::mutex> map_lock(map_mutex); 
+      RCLCPP_DEBUG(get_logger(), "Tracking was lost -- resetting pose based on loop closure: %s", newKFPose.prettyPrint().c_str());
+      lastKFPose = newKFPose;
+      trackingLost = false;
+      previous_keyframe_->setGlobalPose(newKFPose, reg_info.covariance);
+      previous_keyframe_->setId(nb_local_keyframes_);
+      local_descriptors_map_.insert({previous_keyframe_->id(), previous_keyframe_});
+      nb_local_keyframes_++;
+    }
+    reg_info.covariance.reshape(1,1).copyTo(calcOdom.pose.covariance);
+    rtabmap_conversions::transformToPoseMsg(newKFPose, calcOdom.pose.pose);
+    calcOdom.header.stamp = rtabmap_conversions::timestampToROS(previous_keyframe_->stamp());
+    auto addKFMsg = std::make_unique<cslam_common_interfaces::msg::LocalKeyframeMatch>();
+    addKFMsg->keyframe0_id = match->keyframe1_id;
+    addKFMsg->keyframe1_id = previous_keyframe_->id();
+    add_recovered_publisher_->publish(std::move(addKFMsg));
+
+    auto odom_msg = std::make_unique<cslam_common_interfaces::msg::KeyframeOdom>();
+    odom_msg->id = previous_keyframe_->id();
+    odom_msg->odom = calcOdom;
+    keyframe_odom_publisher_->publish(std::move(odom_msg));
+  } else {
+    RCLCPP_DEBUG(get_logger(), "Could not re-align tracking based on new KF -- will try with next one");
+  }
+}
+
 void MapManager::receive_local_keyframe_match(
     cslam_common_interfaces::msg::LocalKeyframeMatch::ConstSharedPtr
         msg)
 {
-  PROFILE_ME;
-  try
-  {
-    std::shared_ptr<rtabmap::SensorData> keyframe0;
-    std::shared_ptr<rtabmap::SensorData> keyframe1;
-    {
-      const std::lock_guard<std::mutex> lock(map_mutex);
-      keyframe0 = local_descriptors_map_.at(msg->keyframe0_id);
-      keyframe1 = local_descriptors_map_.at(msg->keyframe1_id);
-    }
-     workerPool.enqueue([this, keyframe0, keyframe1, msg]() -> void {
-        auto signatures = this->computeMatches(keyframe0, keyframe1);
+    PROFILE_ME;
+    workerPool.enqueue([this, msg]() -> void {
+      try {
+        std::shared_ptr<rtabmap::SensorData> keyframe0;
+        std::shared_ptr<rtabmap::SensorData> keyframe1;
+        {
+          const std::lock_guard<std::mutex> lock(map_mutex);
+          keyframe0 = local_descriptors_map_.at(msg->keyframe0_id);
+          keyframe1 = local_descriptors_map_.at(msg->keyframe1_id);
+        }
+        auto signatures = this->computeMatches(*keyframe0, *keyframe1);
         if (signatures.first == nullptr || signatures.second == nullptr) {
           auto lc = std::make_unique<cslam_common_interfaces::msg::IntraRobotLoopClosure>();
           lc->keyframe0_id = msg->keyframe0_id;
@@ -612,23 +677,25 @@ void MapManager::receive_local_keyframe_match(
           lc->success = false;
           intra_robot_loop_closure_publisher_->publish(std::move(lc));
         } else {
-          workerPool.enqueue([this, signatures, msg]() -> void
+          workerPool.enqueue([this, signatures, keyframe0, msg]() -> void
           {   PROFILE_ME_AS("Intra Registration");
-              auto lc = std::make_unique<cslam_common_interfaces::msg::IntraRobotLoopClosure>();
-              lc->keyframe0_id = msg->keyframe0_id;
-              lc->keyframe1_id = msg->keyframe1_id;
-              lc->success = false;
               rtabmap::RegistrationInfo reg_info;
 
               rtabmap::Transform t = intra_registration_->computeTransformation(
                   *signatures.first, *signatures.second, rtabmap::Transform(), &reg_info);
-            
+              auto lc = std::make_unique<cslam_common_interfaces::msg::IntraRobotLoopClosure>();
+              lc->keyframe0_id = msg->keyframe0_id;
+              lc->keyframe1_id = msg->keyframe1_id;
+              lc->success = false;
               if (!t.isNull())
               {
+                const std::lock_guard<std::mutex> pose_lock(current_pose_mutex);
+                if (!external_odom_ && msg->keyframe1_id == previous_keyframe_->id()) {
+                  lastKFPose = keyframe0->globalPose() * t;
+                }
                 lc->success = true;
-                auto fluFrame = CameraModel::opticalRotation() * t * CameraModel::opticalRotation().inverse();
                 reg_info.covariance.reshape(1,1).copyTo(lc->pose.covariance);
-                rtabmap_conversions::transformToPoseMsg(fluFrame, lc->pose.pose);
+                rtabmap_conversions::transformToPoseMsg(t, lc->pose.pose);
               }
               else
               {
@@ -639,18 +706,19 @@ void MapManager::receive_local_keyframe_match(
                     reg_info.rejectedMsg.c_str());
               }
               intra_robot_loop_closure_publisher_->publish(std::move(lc));
+              
             });
         }
-    });
-  }
-  catch (std::exception &e)
-  {
-    RCLCPP_WARN(
-        get_logger(),
-        "Exception: Could not compute local transformation between %d and %d: %s",
-        msg->keyframe0_id, msg->keyframe1_id,
-        e.what());
-  }
+      }
+      catch (std::exception &e)
+      {
+        RCLCPP_WARN(
+            get_logger(),
+            "Exception: Could not compute local transformation between %d and %d: %s",
+            msg->keyframe0_id, msg->keyframe1_id,
+            e.what());
+      }
+  });
 }
 
 void MapManager::local_descriptors_msg_to_sensor_data(
@@ -694,7 +762,7 @@ void MapManager::receive_local_image_descriptors(
         }
 
         workerPool.enqueue([this, local_keyframe_id, from, to, msg]() -> void {
-            auto signatures = this->computeMatches(from, to);
+            auto signatures = this->computeMatches(*from, *to);
             if (signatures.first == nullptr || signatures.second == nullptr) {
               auto lc = std::make_unique<cslam_common_interfaces::msg::InterRobotLoopClosure>();
               lc->robot0_id = robot_id_;
@@ -721,9 +789,8 @@ void MapManager::receive_local_image_descriptors(
                   if (!t.isNull())
                   {
                     lc->success = true;
-                    auto fluFrame = CameraModel::opticalRotation() * t * CameraModel::opticalRotation().inverse();
                     reg_info.covariance.reshape(1,1).copyTo(lc->pose.covariance);
-                    rtabmap_conversions::transformToPoseMsg(fluFrame, lc->pose.pose);
+                    rtabmap_conversions::transformToPoseMsg(t, lc->pose.pose);
                   }
                   else
                   {
@@ -753,7 +820,7 @@ void MapManager::receive_local_image_descriptors(
 
 const Eigen::Affine3d opticalTransform = rtabmap::CameraModel::opticalRotation().toEigen3d();
 
-void MapManager::send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data, bool newMap, const sensor_msgs::msg::NavSatFix * gps_data)
+void MapManager::send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data, const sensor_msgs::msg::NavSatFix * gps_data)
 {
   cv::Mat img;
   if (global_image_topic_.length() > 0) {
@@ -764,20 +831,31 @@ void MapManager::send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorDa
 
   // Image message
   std_msgs::msg::Header header;
-  header.stamp = keypoints_data.second->header.stamp;
+  if (keypoints_data.second)
+    header.stamp = keypoints_data.second->header.stamp;
+  else
+    header.stamp = now();
+
   cv_bridge::CvImage image_bridge = cv_bridge::CvImage(header, img.channels() > 1? "bgr8":"mono8",img);
   auto keyframe_msg = std::make_unique<cslam_common_interfaces::msg::KeyframeRGB>();
   image_bridge.toImageMsg(keyframe_msg->image);
   keyframe_msg->id = keypoints_data.first->id();
-
   keyframe_data_publisher_->publish(std::move(keyframe_msg));
 
-  auto odom_msg = std::make_unique<cslam_common_interfaces::msg::KeyframeOdom>();
-  odom_msg->id = keypoints_data.first->id();
-  odom_msg->odom = *keypoints_data.second;
-  odom_msg->tracking_reset = newMap;
-  if(gps_data != nullptr) 
-    odom_msg->gps = *gps_data;
+  if (keypoints_data.second != nullptr) {
+    auto odom_msg = std::make_unique<cslam_common_interfaces::msg::KeyframeOdom>();
+    odom_msg->id = keypoints_data.first->id();
+    odom_msg->odom = *keypoints_data.second;
+    if(gps_data != nullptr) 
+      odom_msg->gps = *gps_data;
+
+    keyframe_odom_publisher_->publish(std::move(odom_msg));
+
+    if (enable_visualization_)
+    {
+      send_visualization(keypoints_data);
+    }
+  }
 
   // if(base_frame_id_.length() > 0 && hasTransform_) {
 
@@ -787,12 +865,6 @@ void MapManager::send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorDa
   //     tf2::toMsg(out, odom_msg->odom.pose.pose);
   // }
 
-  keyframe_odom_publisher_->publish(std::move(odom_msg));
-
-  if (enable_visualization_)
-  {
-    send_visualization(keypoints_data);
-  }
 }
 
 void MapManager::send_visualization(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data)

@@ -74,7 +74,9 @@ void StereoHandler<SyncPolicy>::stereo_callback(
         return;
       }
   } else {
-    sensor_data->local_transform.push_back(geometry_msgs::msg::Transform());
+    geometry_msgs::msg::Transform optTransform;
+    rtabmap_conversions::transformToGeometryMsg(rtabmap::CameraModel::opticalRotation(), optTransform);
+    sensor_data->local_transform.push_back(optTransform);
   }
-  sensor_queue_->add<0>(sensor_data);
+  imagery_queue_.add(sensor_data);
 }

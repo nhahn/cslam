@@ -18,6 +18,7 @@ class LoopClosureSparseMatching(object):
         # Extract params
         self.params = params
         self.node = node
+        self.current_kf = -1
         # Initialize matching structs
         if self.params["frontend.sensor_type"] == "lidar":
             self.local_nnsm = ScanContextMatching()
@@ -44,6 +45,7 @@ class LoopClosureSparseMatching(object):
         matches = []
         tensor = torch.from_numpy(embedding.astype(np.float32))
         self.local_nnsm.add_item(tensor, keyframe_id)
+        self.current_kf = keyframe_id
         for i in range(self.params['max_nb_robots']):
             if i != self.params['robot_id']:
                 kf, similarity = self.other_robots_nnsm[i].search_best(tensor)

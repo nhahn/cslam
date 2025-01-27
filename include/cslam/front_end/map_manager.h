@@ -23,6 +23,7 @@
 
 #include <message_filters/cache.h>
 
+#include <std_msgs/msg/u_int32.hpp>
 #include <image_transport/image_transport.hpp>
 #include <image_transport/subscriber_filter.hpp>
 
@@ -127,7 +128,7 @@ public:
        * @param frame_data Full frame data
        */
       bool
-      compute_local_descriptors(std::shared_ptr<rtabmap::SensorData> frame_data, const cv::Mat &img);
+      compute_local_descriptors(std::shared_ptr<rtabmap::SensorData> frame_data);
 
       /**
        * @brief converts descriptors to sensore data
@@ -159,7 +160,7 @@ public:
        * @return true A new keyframe is added to the map
        * @return false The frame is rejected
        */
-      bool generate_new_keyframe(const std::shared_ptr<rtabmap::SensorData> data, const cv::Mat &img);
+      rtabmap::Transform compute_flow(const std::shared_ptr<rtabmap::SensorData> data, rtabmap::RegistrationInfo &reg_info);
 
       /**
        * @brief Function to send the image to the python node
@@ -167,7 +168,7 @@ public:
        * @param keypoints_data keyframe keypoints data
        * @param gps_data GPS data
        */
-      void send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data, bool newMap = false, const sensor_msgs::msg::NavSatFix * gps_data = nullptr);
+      void send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data, const sensor_msgs::msg::NavSatFix * gps_data = nullptr);
 
 
       void send_visualization(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data);
@@ -192,6 +193,7 @@ public:
        */
       void clear_sensor_data(std::shared_ptr<rtabmap::SensorData> sensor_data);
 
+      void recover_odom_pose(cslam_common_interfaces::msg::LocalKeyframeMatch::ConstSharedPtr match);
       /**
        * @brief Subsample pointcloud to reduce size for visualization
        * 
@@ -206,10 +208,15 @@ public:
         std::shared_ptr<rtabmap::SensorData> previous_keyframe_;
         std::string sensor_type;
 
+        rtabmap::Transform lastKFPose;
+        bool trackingLost = false;
+
         std::map<int, std::shared_ptr<rtabmap::SensorData>> local_descriptors_map_;
 
         unsigned int min_inliers_, max_nb_robots_, robot_id_, max_queue_size_,
             nb_local_keyframes_, map_manager_process_period_ms_;
+        rclcpp::Subscription<cslam_common_interfaces::msg::LocalKeyframeMatch>::SharedPtr recovery_subscriber_;
+        rclcpp::Publisher<cslam_common_interfaces::msg::LocalKeyframeMatch>::SharedPtr add_recovered_publisher_;
 
         rclcpp::Subscription<
             cslam_common_interfaces::msg::LocalDescriptorsRequest>::SharedPtr
@@ -253,7 +260,7 @@ public:
             diagnostic_msgs::msg::KeyValue>::SharedPtr
             log_publisher_;
         unsigned int log_total_local_descriptors_cumulative_communication_;
-        bool enable_logs_;
+        bool enable_logs_, external_odom_;
 
         float keyframe_generation_ratio_threshold_;
         int min_3d_keypoints_;
@@ -269,13 +276,15 @@ public:
         lightglue::Configuration lightglueConfig;
         std::shared_ptr<OpticalFlow> optical_matcher;
     private:
+        nav_msgs::msg::Odometry calcOdom;
+        rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
         std::shared_ptr<SensorHandler> sensor_handler_ {nullptr};
         rclcpp::CallbackGroup::SharedPtr timerCB;
         bool setMatches(rtabmap::Signature &from, rtabmap::Signature &to);
-        std::pair<std::shared_ptr<rtabmap::Signature>, std::shared_ptr<rtabmap::Signature>> computeMatches(std::shared_ptr<rtabmap::SensorData> k1, std::shared_ptr<rtabmap::SensorData> k2);
+        std::pair<std::shared_ptr<rtabmap::Signature>, std::shared_ptr<rtabmap::Signature>> computeMatches(const rtabmap::SensorData& k1, const rtabmap::SensorData& k2);
         rtabmap::ParametersMap rtabmap_parameters;
         sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_;
-        std::mutex map_mutex, prev_frame_mutex;
+        std::mutex map_mutex, prev_frame_mutex, current_pose_mutex;
         ThreadPool workerPool;
         //ThreadPool keypointExtractorPool, matcherPool, poseEstimatorPool;
   
