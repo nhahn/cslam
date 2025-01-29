@@ -45,6 +45,7 @@ StereoHandler<SyncPolicy>::StereoHandler(rclcpp::Node * node) : SensorHandler(no
                     std::placeholders::_4));
 
     }
+
 template<typename SyncPolicy>
 void StereoHandler<SyncPolicy>::stereo_callback(
     const sensor_msgs::msg::Image::ConstSharedPtr image_rect_left,
@@ -58,6 +59,8 @@ void StereoHandler<SyncPolicy>::stereo_callback(
   sensor_data->header.stamp = image_rect_left->header.stamp;
   sensor_data->left_camera_info.push_back(*camera_info_left);
   sensor_data->right_camera_info.push_back(*camera_info_right);
+  sensor_data->header.frame_id = image_rect_left->header.frame_id;
+
   if(base_frame_id_.length() > 0) {
       geometry_msgs::msg::TransformStamped t;
 
@@ -74,9 +77,7 @@ void StereoHandler<SyncPolicy>::stereo_callback(
         return;
       }
   } else {
-    geometry_msgs::msg::Transform optTransform;
-    rtabmap_conversions::transformToGeometryMsg(rtabmap::CameraModel::opticalRotation(), optTransform);
-    sensor_data->local_transform.push_back(optTransform);
+    sensor_data->local_transform.push_back(rosCameraTransform);
   }
   imagery_queue_.add(sensor_data);
 }

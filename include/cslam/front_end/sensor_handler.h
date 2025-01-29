@@ -38,7 +38,8 @@ namespace cslam
          */
         explicit SensorHandler(rclcpp::Node * node);
         ~SensorHandler(){};
-
+        std::pair<std::shared_ptr<rtabmap::SensorData>, nav_msgs::msg::Odometry::ConstSharedPtr> getNextPair();
+        bool hasData();
         /**
          * @brief Process new data callback
          * 
@@ -48,7 +49,6 @@ namespace cslam
             SensorSyncPolicy;
         std::unique_ptr<message_filters::Synchronizer<SensorSyncPolicy>> sensor_synchronizer_;
         message_filters::PassThrough<rtabmap_msgs::msg::SensorData> imagery_queue_;
-        std::deque<std::pair<std::shared_ptr<rtabmap::SensorData>, nav_msgs::msg::Odometry::ConstSharedPtr>> process_queue_;
         bool enable_gps_recording_, external_odom_;
         std::string gps_topic_;
         sensor_msgs::msg::NavSatFix latest_gps_fix_;
@@ -56,15 +56,19 @@ namespace cslam
             received_gps_queue_;
         std::string base_frame_id_;
         std::atomic_ulong map_id{0}; int resetCounter = 4;
+        std::string sensor_frame = "base_link";
             
         protected:
             rclcpp::Node * node_;
+            rtabmap::Transform defaultCameraTransform; geometry_msgs::msg::Transform rosCameraTransform;
             size_t max_queue_size_;
             std::shared_ptr<tf2_ros::Buffer>
                 tf_buffer_;
             std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
             std::shared_ptr<rtabmap::StereoCameraModel> stereoCameraModel {nullptr};
         private:
+            std::deque<std::pair<std::shared_ptr<rtabmap::SensorData>, nav_msgs::msg::Odometry::ConstSharedPtr>> process_queue_;
+            std::mutex queueMutex;
             rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr gps_subscriber_;
             rtabmap::Transform stereoTransform;
             bool alreadyRectified = true;

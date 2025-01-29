@@ -51,6 +51,7 @@ void RGBDHandler<SyncPolicy>::rgbd_callback(
   sensor_data->left = *image_rect_rgb;
   sensor_data->right = *image_rect_depth;
   sensor_data->header.stamp = stamp;
+  sensor_data->header.frame_id = image_rect_rgb->header.frame_id;
   sensor_data->left_camera_info.push_back(*camera_info_rgb);
 
   if(base_frame_id_.length() > 0) {
@@ -71,9 +72,7 @@ void RGBDHandler<SyncPolicy>::rgbd_callback(
         return;
       }
   } else {
-    geometry_msgs::msg::Transform optTransform;
-    rtabmap_conversions::transformToGeometryMsg(rtabmap::CameraModel::opticalRotation(), optTransform);
-    sensor_data->local_transform.push_back(optTransform);
+    sensor_data->local_transform.push_back(rosCameraTransform);
   }
 
   imagery_queue_.add(sensor_data);

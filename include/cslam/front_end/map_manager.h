@@ -130,7 +130,7 @@ public:
        * @param frame_data Full frame data
        */
       bool
-      compute_local_descriptors(std::shared_ptr<rtabmap::SensorData> frame_data);
+      compute_local_descriptors(std::shared_ptr<rtabmap::SensorData> frame_data, const cv::Mat &img);
 
       /**
        * @brief converts descriptors to sensore data
@@ -162,7 +162,7 @@ public:
        * @return true A new keyframe is added to the map
        * @return false The frame is rejected
        */
-      rtabmap::Transform compute_flow(const std::shared_ptr<rtabmap::SensorData> data, rtabmap::RegistrationInfo &reg_info);
+      rtabmap::Transform compute_flow(const std::shared_ptr<rtabmap::SensorData> newData, const cv::Mat& toImg, rtabmap::RegistrationInfo &reg_info);
 
       /**
        * @brief Function to send the image to the python node
@@ -207,11 +207,11 @@ public:
 
     protected:
         rclcpp::TimerBase::SharedPtr process_timer_;
-        std::shared_ptr<rtabmap::SensorData> previous_keyframe_;
+        std::shared_ptr<rtabmap::SensorData> current_keyframe_;
         std::string sensor_type;
         std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
-        rtabmap::Transform lastKFPose;
+        rtabmap::Transform lastKFPose, currentPose;
         bool trackingLost = false;
 
         std::map<int, std::shared_ptr<rtabmap::SensorData>> local_descriptors_map_;
@@ -238,6 +238,12 @@ public:
 
         rclcpp::Publisher<cslam_common_interfaces::msg::VizPointCloud>::SharedPtr
             keyframe_pointcloud_publisher_;
+
+        rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr
+            keyframe_keypoint_viz_;
+
+        rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr
+            keyframe_matches_viz_;
 
         rclcpp::Subscription<
             cslam_common_interfaces::msg::LocalKeyframeMatch>::SharedPtr
@@ -279,14 +285,17 @@ public:
         lightglue::Configuration lightglueConfig;
         std::shared_ptr<OpticalFlow> optical_matcher;
     private:
+        cv::Mat keypointViz, matchesViz;
+
+
         nav_msgs::msg::Odometry calcOdom;
         geometry_msgs::msg::TransformStamped odomTf;
         
         rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
         std::shared_ptr<SensorHandler> sensor_handler_ {nullptr};
-        rclcpp::CallbackGroup::SharedPtr timerCB;
+        rclcpp::CallbackGroup::SharedPtr sensorDataCB;
         bool setMatches(rtabmap::Signature &from, rtabmap::Signature &to);
-        std::pair<std::shared_ptr<rtabmap::Signature>, std::shared_ptr<rtabmap::Signature>> computeMatches(const rtabmap::SensorData& k1, const rtabmap::SensorData& k2);
+        std::pair<std::shared_ptr<rtabmap::Signature>, std::shared_ptr<rtabmap::Signature>> computeMatches(const rtabmap::SensorData& from, const rtabmap::SensorData& to);
         rtabmap::ParametersMap rtabmap_parameters;
         sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_;
         std::mutex map_mutex, prev_frame_mutex, current_pose_mutex;

@@ -259,8 +259,10 @@ void DecentralizedPGO::odometry_callback(
   gtsam::SharedNoiseModel noise = default_noise_model_;
   if (msg->odom.pose.covariance.front() != 0.0) {
     Vector6 diagonals;
-    for (int i = 0; i < 6; i++) {
-      diagonals[i] = msg->odom.pose.covariance[i * 7];
+    for (int i = 0; i < 3; i++) {
+      //GTSAM does rotation first, then translation
+      diagonals[i] = msg->odom.pose.covariance[(i + 3) * 7];
+      diagonals[i+3] = msg->odom.pose.covariance[i * 7];
     }
     noise = gtsam::noiseModel::Diagonal::Variances(diagonals);
   }
@@ -307,8 +309,10 @@ void DecentralizedPGO::intra_robot_loop_closure_callback(
   {
     gtsam::Pose3 measurement = pose_msg_to_gtsam(msg->pose.pose);
     Vector6 diagonals;
-    for (int i = 0; i < 6; i++) {
-      diagonals[i] = msg->pose.covariance[i * 7];
+    for (int i = 0; i < 3; i++) {
+      //GTSAM does rotation first, then
+      diagonals[i] = msg->pose.covariance[(i + 3) * 7];
+      diagonals[i+3] = msg->pose.covariance[i * 7];
     }
     auto noise = gtsam::noiseModel::Diagonal::Variances(diagonals);
     
@@ -342,8 +346,10 @@ void DecentralizedPGO::inter_robot_loop_closure_callback(
   {
     gtsam::Pose3 measurement = pose_msg_to_gtsam(msg->pose.pose);
     Vector6 diagonals;
-    for (int i = 0; i < 6; i++) {
-      diagonals[i] = msg->pose.covariance[i * 7];
+    for (int i = 0; i < 3; i++) {
+      //GTSAM does rotation first, then
+      diagonals[i] = msg->pose.covariance[(i + 3) * 7];
+      diagonals[i+3] = msg->pose.covariance[i * 7];
     }
     auto noise = gtsam::noiseModel::Diagonal::Variances(diagonals);
     unsigned char robot0_c = ROBOT_LABEL(msg->robot0_id);

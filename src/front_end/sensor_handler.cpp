@@ -16,6 +16,8 @@ SensorHandler::SensorHandler(rclcpp::Node * node) : node_(node) {
   node_->declare_parameter<float>("frontend.sync_period", 0.2);
   node->declare_parameter<std::string>("frontend.odom_topic", "odom");
   node->get_parameter("frontend.use_external_odom", external_odom_);
+  defaultCameraTransform = rtabmap::CameraModel::opticalRotation();
+  rtabmap_conversions::transformToGeometryMsg(defaultCameraTransform, rosCameraTransform);
 
   if (external_odom_) {
     sub_odometry_.subscribe(node,
@@ -141,6 +143,22 @@ std::shared_ptr<rtabmap::StereoCameraModel> SensorHandler::fetchStereoModel(cons
     return stereoCameraModel;
 }
 
+bool SensorHandler::hasData() {
+  std::lock_guard<std::mutex> queue_lock(queueMutex);
+  return !process_queue_.empty();
+}
+
+std::pair<std::shared_ptr<rtabmap::SensorData>, nav_msgs::msg::Odometry::ConstSharedPtr> SensorHandler::getNextPair() {
+  std::lock_guard<std::mutex> queue_lock(queueMutex);
+  if (!process_queue_.empty())
+  {
+    auto pair = process_queue_.front();
+    process_queue_.pop_front();
+    return pair;
+  }
+  return std::make_pair(nullptr, nullptr);
+}
+
 
  void SensorHandler::sensor_odom_callback(
         const rtabmap_msgs::msg::SensorData::ConstSharedPtr sensorMsg, 
@@ -160,6 +178,7 @@ std::shared_ptr<rtabmap::StereoCameraModel> SensorHandler::fetchStereoModel(cons
     } 
 
     auto sensorData = std::make_shared<rtabmap::SensorData>(rtabmap_conversions::sensorDataFromROS(*sensorMsg));
+    sensor_frame = sensorMsg->header.frame_id;
     if (sensorData->stereoCameraModels().size() > 0) {
       auto model = fetchStereoModel(sensorMsg);
       if (!model) return;
@@ -167,25 +186,25 @@ std::shared_ptr<rtabmap::StereoCameraModel> SensorHandler::fetchStereoModel(cons
     }
 
     if (sensorData->isValid()) {
-      resetCounter = 4;
-        process_queue_.push_back(std::make_pair(sensorData, odom));
-        if (process_queue_.size() > max_queue_size_)
-        {
-          // Remove the oldest keyframes if we exceed the maximum size
-          process_queue_.pop_front();
-          // RCLCPP_DEBUG(
-          //     node_->get_logger(),
-          //     "SensorHandler: Maximum queue size (%d) exceeded, the oldest element was removed.",
-          //     max_queue_size_);
-        }
+      std::lock_guard<std::mutex> queue_lock(queueMutex);
+      process_queue_.push_back(std::make_pair(sensorData, odom));
+      if (process_queue_.size() > max_queue_size_)
+      {
+        // Remove the oldest keyframes if we exceed the maximum size
+        process_queue_.pop_front();
+        // RCLCPP_DEBUG(
+        //     node_->get_logger(),
+        //     "SensorHandler: Maximum queue size (%d) exceeded, the oldest element was removed.",
+        //     max_queue_size_);
+      }
 
-        if (enable_gps_recording_) {
-          received_gps_queue_.push_back(latest_gps_fix_);
-          if (received_gps_queue_.size() > max_queue_size_)
-          {
-            received_gps_queue_.pop_front();
-          }
+      if (enable_gps_recording_) {
+        received_gps_queue_.push_back(latest_gps_fix_);
+        if (received_gps_queue_.size() > max_queue_size_)
+        {
+          received_gps_queue_.pop_front();
         }
-    }
+      }
+  }
     
 }
