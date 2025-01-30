@@ -84,15 +84,26 @@ def launch_setup(context, *args, **kwargs):
         loop_detection_node,
         ComposableNodeContainer(
                 namespace=LaunchConfiguration('namespace'),
-                name='cslam_container',
+                name='map_container',
                 package='rclcpp_components',
                 executable='component_container_mt',
                 arguments=['--ros-args','--log-level',LaunchConfiguration('log_level'),'--log-level','rcl:=INFO', '--log-level','rmw_zenoh_cpp:=FATAL'],
-                composable_node_descriptions=[pose_graph_manager_component, global_descriptor_component, map_manager],
+                composable_node_descriptions=[global_descriptor_component, map_manager],
                 prefix=['stdbuf -o L'],
                 output='screen',
                 #  prefix="gdbgui --args",
-        )
+        ), 
+        ComposableNodeContainer(
+                namespace=LaunchConfiguration('namespace'),
+                name='pose_container',
+                package='rclcpp_components',
+                executable='component_container_mt',
+                arguments=['--ros-args','--log-level',LaunchConfiguration('log_level'),'--log-level','rcl:=INFO', '--log-level','rmw_zenoh_cpp:=FATAL'],
+                composable_node_descriptions=[pose_graph_manager_component],
+                prefix=['stdbuf -o L'],
+                output='screen',
+                #  prefix="gdbgui --args",
+        ),
     ]
 
 

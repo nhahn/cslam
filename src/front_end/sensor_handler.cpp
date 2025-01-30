@@ -16,6 +16,8 @@ SensorHandler::SensorHandler(rclcpp::Node * node) : node_(node) {
   node_->declare_parameter<float>("frontend.sync_period", 0.2);
   node->declare_parameter<std::string>("frontend.odom_topic", "odom");
   node->get_parameter("frontend.use_external_odom", external_odom_);
+  node->declare_parameter<float>("frontend.odom_sync_period", 0.1);
+  node->get_parameter("frontend.odom_sync_threshold", external_odom_);
   defaultCameraTransform = rtabmap::CameraModel::opticalRotation();
   rtabmap_conversions::transformToGeometryMsg(defaultCameraTransform, rosCameraTransform);
 
@@ -27,6 +29,7 @@ SensorHandler::SensorHandler(rclcpp::Node * node) : node_(node) {
 
       sensor_synchronizer_ = std::make_unique<message_filters::Synchronizer<SensorSyncPolicy>>(
           SensorSyncPolicy(max_queue_size_), imagery_queue_, sub_odometry_);
+      sensor_synchronizer_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(node_->get_parameter("frontend.odom_sync_period").as_double()));
       sensor_synchronizer_->registerCallback(std::bind(&SensorHandler::sensor_odom_callback, this, std::placeholders::_1,
           std::placeholders::_2));
   } else {

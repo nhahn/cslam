@@ -326,18 +326,6 @@ bool MapManager::setMatches(rtabmap::Signature &from, rtabmap::Signature &to) {
   const auto fromModel = from.sensorData().stereoCameraModels().size() > 0? from.sensorData().stereoCameraModels()[0].left() : from.sensorData().cameraModels()[0];
   const auto toModel = to.sensorData().stereoCameraModels().size() > 0? to.sensorData().stereoCameraModels()[0].left() : to.sensorData().cameraModels()[0];
 
-  std::list<int> fromWordIds;
-  std::list<int> toWordIds;
-  std::vector<int> fromWordIdsV(descriptorsFrom.rows);
-  std::vector<int> toWordIdsV(descriptorsTo.rows, 0);
-  for (int i = 0; i < descriptorsFrom.rows; ++i)
-  {
-    int id = i+1;
-    fromWordIds.push_back(id);
-    fromWordIdsV[i] = id;
-  }
-  //RCLCPP_DEBUG(get_logger(), "Maching: %d %d -- %d %d", kptsTo.size(), kptsFrom.size(), descriptorsTo.rows, descriptorsFrom.rows);
-
   std::vector<cv::DMatch> matches;
   try {
     //Query = TO keypoints, Train = FROM Keypoints
@@ -350,86 +338,50 @@ bool MapManager::setMatches(rtabmap::Signature &from, rtabmap::Signature &to) {
     return false;
   }
 
-  // if (keyframe_matches_viz_->get_subscription_count() > 0) {
-  //     auto imgMsg = std::make_unique<sensor_msgs::msg::Image>();
-  //     cv::drawKeypoints(frame_data->imageRaw(), extData.first, keypointViz);
-  //     std_msgs::msg::Header header;
-  //     header.frame_id = sensor_handler_->sensor_frame;
-  //     header.stamp = now();
-  //     cv_bridge::CvImage(header, "bgr8", keypointViz).toImageMsg(*imgMsg);
-  //     keyframe_matches_viz_->publish(std::move(imgMsg));
-  // }
-  
-  for(size_t i=0; i<matches.size(); ++i)
+  std::multimap<int, int> wordsFrom;
+  std::multimap<int, int> wordsTo;
+  std::vector<cv::KeyPoint> wordsKptsFrom;
+  std::vector<cv::KeyPoint> wordsKptsTo;
+  std::vector<cv::Point3f> words3From;
+  std::vector<cv::Point3f> words3To;
+  std::vector<cv::KeyPoint> kptsFromKept(matches.size());
+  std::vector<cv::KeyPoint> kptsToKept(matches.size());
+  std::vector<cv::Point3f> kptsTo3DKept(matches.size());
+  std::vector<cv::Point3f> kptsFrom3DKept(matches.size());
+  for(unsigned int i=0; i<matches.size(); ++i)
   {
-      toWordIdsV[matches[i].queryIdx] = fromWordIdsV[matches[i].trainIdx];
+      kptsFromKept[i] = kptsFrom[matches[i].trainIdx];
+      kptsFrom3DKept[i] = kptsFrom3D[matches[i].trainIdx];
+      kptsToKept[i] = kptsTo[matches[i].queryIdx];
+      kptsTo3DKept[i] = kptsTo3D[matches[i].queryIdx];
   }
-  for(size_t i=0; i<toWordIdsV.size(); ++i)
+
+  UASSERT(kptsFromKept.size() == kptsFrom3DKept.size());
+  UASSERT(kptsFromKept.size() == kptsToKept.size());
+  for(unsigned int i=0; i< kptsFrom3DKept.size(); ++i)
   {
-      int toId = toWordIdsV[i];
-      if(toId==0)
-      {
-          toId = fromWordIds.back()+i+1;
-      }
-      toWordIds.push_back(toId);
-    }
-    std::multiset<int> fromWordIdsSet(fromWordIds.begin(), fromWordIds.end());
-    std::multiset<int> toWordIdsSet(toWordIds.begin(), toWordIds.end());
+    wordsFrom.insert(wordsFrom.end(), std::make_pair(i, wordsFrom.size()));
+    wordsKptsFrom.push_back(kptsFromKept[i]);
+    words3From.push_back(kptsFrom3DKept[i]);
 
-    std::multimap<int, int> wordsFrom;
-    std::multimap<int, int> wordsTo;
-    std::vector<cv::KeyPoint> wordsKptsFrom;
-    std::vector<cv::KeyPoint> wordsKptsTo;
-    std::vector<cv::Point3f> words3From;
-    std::vector<cv::Point3f> words3To;
+    wordsTo.insert(wordsTo.end(), std::make_pair(i, wordsTo.size()));
+    wordsKptsTo.push_back(kptsToKept[i]);
+    words3To.push_back(kptsTo3DKept[i]);
+  }
 
-    int i=0;
-    UASSERT(kptsFrom3D.empty() || fromWordIds.size() == kptsFrom3D.size());
-    UASSERT(int(fromWordIds.size()) == descriptorsFrom.rows);
-    for(std::list<int>::iterator iter=fromWordIds.begin(); iter!=fromWordIds.end(); ++iter)
-    {
-        if(fromWordIdsSet.count(*iter) == 1)
-        {
-          wordsFrom.insert(wordsFrom.end(), std::make_pair(*iter, wordsFrom.size()));
-          if (!kptsFrom.empty())
-          {
-              wordsKptsFrom.push_back(kptsFrom[i]);
-          }
-          if(!kptsFrom3D.empty())
-          {
-              words3From.push_back(kptsFrom3D[i]);
-          }
-        }
-        ++i;
-    }
-    UASSERT(kptsTo3D.size() == 0 || kptsTo3D.size() == kptsTo.size());
-    UASSERT(toWordIds.size() == kptsTo.size());
-    UASSERT(int(toWordIds.size()) == descriptorsTo.rows);
-
-    i=0;
-    for(std::list<int>::iterator iter=toWordIds.begin(); iter!=toWordIds.end(); ++iter)
-    {
-      if(toWordIdsSet.count(*iter) == 1)
-      {
-          wordsTo.insert(wordsTo.end(), std::make_pair(*iter, wordsTo.size()));
-          wordsKptsTo.push_back(kptsTo[i]);
-          if(!kptsTo3D.empty())
-          {
-              words3To.push_back(kptsTo3D[i]);
-          }
-      }
-      ++i;
-    }
-
-    from.setWords(wordsFrom, wordsKptsFrom, words3From, cv::Mat());
-    to.setWords(wordsTo, wordsKptsTo, words3To, cv::Mat());
-    return true;
+  RCLCPP_DEBUG(get_logger(), "Found the following matches: Words %lu -> %lu, Kpts %lu -> %lu, 3D Kpts %lu -> %lu", wordsFrom.size(), wordsTo.size(), wordsKptsFrom.size(),
+      wordsKptsTo.size(), words3From.size(), words3To.size());
+  from.setWords(wordsFrom, wordsKptsFrom, words3From, cv::Mat());
+  to.setWords(wordsTo, wordsKptsTo, words3To, cv::Mat());
+  return true;
 }
 
 std::pair<std::shared_ptr<rtabmap::Signature>, std::shared_ptr<rtabmap::Signature>> MapManager::computeMatches(const rtabmap::SensorData& f, const rtabmap::SensorData& t) {
     PROFILE_ME;
 
     auto from = std::make_shared<rtabmap::Signature>(f), to = std::make_shared<rtabmap::Signature>(t);
+    from->sensorData().clearRawData(); to->sensorData().clearRawData();
+    from->sensorData().clearCompressedData(); to->sensorData().clearCompressedData();
     bool hasMaches = setMatches(*from, *to);
     if (!hasMaches)
       return std::pair<std::shared_ptr<rtabmap::Signature>, std::shared_ptr<rtabmap::Signature>>(nullptr, nullptr);
@@ -856,9 +808,14 @@ void MapManager::receive_local_image_descriptors(
                   {
                     RCLCPP_INFO(
                         get_logger(),
-                        "Inter-robot loop closure failed between (%d,%d) and (%d,%d): %s",
+                        "Inter-robot loop closure failed between (%d,%d) and (%d,%d): %s \n Mean Distance: %f, total time: %f",
                         lc->robot0_id, lc->robot0_keyframe_id, lc->robot1_id, lc->robot1_keyframe_id,
-                        reg_info.rejectedMsg.c_str());
+                        reg_info.rejectedMsg.c_str(), reg_info.inliersMeanDistance, reg_info.totalTime);
+                    RCLCPP_INFO(get_logger(), "There were the matches: Words %lu -> %lu, Kpts %lu -> %lu, 3D Kpts %lu -> %lu",
+                     signatures.first->getWords().size(),  signatures.second->getWords().size(), 
+                     signatures.first->getWordsKpts().size(), signatures.second->getWordsKpts().size(),
+                     signatures.first->getWords3().size(), signatures.second->getWords3().size());
+
                   }
                   inter_robot_loop_closure_publisher_->publish(std::move(lc));
                 });
