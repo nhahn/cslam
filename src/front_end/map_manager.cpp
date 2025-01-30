@@ -150,7 +150,7 @@ MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_
      recoveryOptions.callback_group = sensorDataCB;
     
      odom_publisher_ = create_publisher<nav_msgs::msg::Odometry>(get_parameter("frontend.odom_topic").as_string() + "/raw", 5);
-     recovery_subscriber_ = create_subscription<cslam_common_interfaces::msg::LocalKeyframeMatch>("cslam/odom_recovery", 1, std::bind(&MapManager::recover_odom_pose, this, std::placeholders::_1), recoveryOptions);
+     recovery_subscriber_ = create_subscription<cslam_common_interfaces::msg::InterRobotMatches>("cslam/odom_recovery", 1, std::bind(&MapManager::recover_odom_pose, this, std::placeholders::_1), recoveryOptions);
      add_recovered_publisher_ = create_publisher<cslam_common_interfaces::msg::LocalKeyframeMatch>("cslam/add_recovered_pose", 5);
      tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(this);
      
@@ -225,7 +225,10 @@ MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_
     // Registration settings
     auto interParams = rtabmap::ParametersMap(rtabmap_parameters);
     interParams.insert_or_assign(rtabmap::Parameters::kVisMinInliers(), std::to_string(get_parameter("frontend.inter_pnp_min_inliers").as_int()));
-    interParams.insert_or_assign(rtabmap::Parameters::kVisForwardEstOnly(), "false");
+    interParams.insert_or_assign(rtabmap::Parameters::kVisForwardEstOnly(), "true");
+    interParams.insert_or_assign(rtabmap::Parameters::kVisRefineIterations(), "0");
+    interParams.insert_or_assign(rtabmap::Parameters::kVisIterations(), "900");
+    interParams.insert_or_assign(rtabmap::Parameters::kVisPnPVarianceMedianRatio(), "3");
     inter_registration_ = std::make_shared<rtabmap::RegistrationVis>(interParams);
 
     auto intraParams = rtabmap::ParametersMap(rtabmap_parameters);
@@ -234,6 +237,7 @@ MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_
     intra_registration_ = std::make_shared<rtabmap::RegistrationVis>(intraParams);
 
     auto f2fParams = rtabmap::ParametersMap(rtabmap_parameters);
+    f2fParams.insert_or_assign(rtabmap::Parameters::kVisIterations(), "300");
     f2fParams.insert_or_assign(rtabmap::Parameters::kVisMinInliers(), "60");
     f2fParams.insert_or_assign(rtabmap::Parameters::kVisPnPRefineIterations(), "0");
     f2f_registration_ = std::make_shared<rtabmap::RegistrationVis>(f2fParams);
@@ -659,49 +663,54 @@ void MapManager::local_descriptors_request(
   }
 }
 
-void MapManager::recover_odom_pose(cslam_common_interfaces::msg::LocalKeyframeMatch::ConstSharedPtr match) {
-  std::shared_ptr<rtabmap::SensorData> currentKF, matching_kf;
-  {
-    const std::lock_guard<std::mutex> pose_lock(current_pose_mutex);
-    if (!trackingLost || !current_keyframe_) return;
-    currentKF = current_keyframe_;
-    matching_kf = local_descriptors_map_.at(match->keyframe0_id);
-  }
-  auto signatures = this->computeMatches(*matching_kf, *currentKF);
-  rtabmap::RegistrationInfo reg_info;
-  rtabmap::Transform t = intra_registration_->computeTransformation(
-              *signatures.first, *signatures.second, rtabmap::Transform(), &reg_info);
-  const std::lock_guard<std::mutex> pose_lock(current_pose_mutex);
-  if (!t.isNull() && current_keyframe_ && currentKF->stamp() == current_keyframe_->stamp()) {
-    //TODO be smarter about this -- we should be able to reuse the new map we're constructing
-    // t.normalizeRotation();
-    auto fromPose = matching_kf->globalPose();
-    RCLCPP_DEBUG(get_logger(), "TF from reovery loop closure: %s * %s",fromPose.prettyPrint().c_str(), t.prettyPrint().c_str());
-    auto newKFPose = fromPose.isNull()? t : fromPose * t;
+void MapManager::recover_odom_pose(cslam_common_interfaces::msg::InterRobotMatches::ConstSharedPtr matches) {
+  for(const auto match : matches->matches) {
+    
+    std::shared_ptr<rtabmap::SensorData> currentKF, matching_kf;
     {
-      const std::lock_guard<std::mutex> map_lock(map_mutex); 
-      RCLCPP_DEBUG(get_logger(), "Tracking was lost -- resetting pose based on loop closure: %s", newKFPose.prettyPrint().c_str());
-      lastKFPose = newKFPose;
-      trackingLost = false;
-      current_keyframe_->setGlobalPose(newKFPose, reg_info.covariance);
-      current_keyframe_->setId(nb_local_keyframes_);
-      local_descriptors_map_.insert({current_keyframe_->id(), current_keyframe_});
-      nb_local_keyframes_++;
+      const std::lock_guard<std::mutex> pose_lock(current_pose_mutex);
+      if (!trackingLost || !current_keyframe_) return;
+      currentKF = current_keyframe_;
+      matching_kf = local_descriptors_map_.at(match.robot0_keyframe_id);
     }
-    reg_info.covariance.reshape(1,1).copyTo(calcOdom.pose.covariance);
-    rtabmap_conversions::transformToPoseMsg(newKFPose, calcOdom.pose.pose);
-    calcOdom.header.stamp = rtabmap_conversions::timestampToROS(current_keyframe_->stamp());
-    auto addKFMsg = std::make_unique<cslam_common_interfaces::msg::LocalKeyframeMatch>();
-    addKFMsg->keyframe0_id = match->keyframe1_id;
-    addKFMsg->keyframe1_id = current_keyframe_->id();
-    add_recovered_publisher_->publish(std::move(addKFMsg));
+    auto signatures = this->computeMatches(*matching_kf, *currentKF);
+    rtabmap::RegistrationInfo reg_info;
+    rtabmap::Transform t = intra_registration_->computeTransformation(
+                *signatures.first, *signatures.second, rtabmap::Transform(), &reg_info);
+    const std::lock_guard<std::mutex> pose_lock(current_pose_mutex);
+    if (!t.isNull() && current_keyframe_ && currentKF->stamp() == current_keyframe_->stamp()) {
+      //TODO be smarter about this -- we should be able to reuse the new map we're constructing
+      // t.normalizeRotation();
+      auto fromPose = matching_kf->globalPose();
+      RCLCPP_DEBUG(get_logger(), "TF from reovery loop closure: %s * %s",fromPose.prettyPrint().c_str(), t.prettyPrint().c_str());
+      auto newKFPose = fromPose.isNull()? t : fromPose * t;
+      {
+        const std::lock_guard<std::mutex> map_lock(map_mutex); 
+        RCLCPP_DEBUG(get_logger(), "Tracking was lost -- resetting pose based on loop closure: %s", newKFPose.prettyPrint().c_str());
+        lastKFPose = newKFPose;
+        trackingLost = false;
+        current_keyframe_->setGlobalPose(newKFPose, reg_info.covariance);
+        current_keyframe_->setId(nb_local_keyframes_);
+        local_descriptors_map_.insert({current_keyframe_->id(), current_keyframe_});
+        nb_local_keyframes_++;
+      }
+      reg_info.covariance.reshape(1,1).copyTo(calcOdom.pose.covariance);
+      rtabmap_conversions::transformToPoseMsg(newKFPose, calcOdom.pose.pose);
+      calcOdom.header.stamp = rtabmap_conversions::timestampToROS(current_keyframe_->stamp());
+      auto addKFMsg = std::make_unique<cslam_common_interfaces::msg::LocalKeyframeMatch>();
+      addKFMsg->keyframe0_id = match.robot1_keyframe_id;
+      addKFMsg->keyframe1_id = current_keyframe_->id();
+      add_recovered_publisher_->publish(std::move(addKFMsg));
 
-    auto odom_msg = std::make_unique<cslam_common_interfaces::msg::KeyframeOdom>();
-    odom_msg->id = current_keyframe_->id();
-    odom_msg->odom = calcOdom;
-    keyframe_odom_publisher_->publish(std::move(odom_msg));
-  } else {
-    RCLCPP_DEBUG(get_logger(), "Could not re-align tracking based on new KF -- will try with next one");
+      auto odom_msg = std::make_unique<cslam_common_interfaces::msg::KeyframeOdom>();
+      odom_msg->id = current_keyframe_->id();
+      odom_msg->odom = calcOdom;
+      keyframe_odom_publisher_->publish(std::move(odom_msg));
+      return;
+    } else {
+      RCLCPP_DEBUG(get_logger(), "Could not re-align tracking based on new KF -- attempting next");
+    }
+    RCLCPP_DEBUG(get_logger(), "Could not align to any previous keyframes");
   }
 }
 

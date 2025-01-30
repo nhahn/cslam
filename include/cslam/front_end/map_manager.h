@@ -37,6 +37,8 @@
 #include <cslam_common_interfaces/msg/keyframe_rgb.hpp>
 #include <cslam_common_interfaces/msg/viz_point_cloud.hpp>
 #include <cslam_common_interfaces/msg/inter_robot_loop_closure.hpp>
+#include <cslam_common_interfaces/msg/inter_robot_matches.hpp>
+
 #include <cslam_common_interfaces/msg/local_descriptors_request.hpp>
 #include <cslam_common_interfaces/msg/local_image_descriptors.hpp>
 #include <cslam_common_interfaces/msg/local_keyframe_match.hpp>
@@ -195,7 +197,7 @@ public:
        */
       void clear_sensor_data(std::shared_ptr<rtabmap::SensorData> sensor_data);
 
-      void recover_odom_pose(cslam_common_interfaces::msg::LocalKeyframeMatch::ConstSharedPtr match);
+      void recover_odom_pose(cslam_common_interfaces::msg::InterRobotMatches::ConstSharedPtr match);
       /**
        * @brief Subsample pointcloud to reduce size for visualization
        * 
@@ -218,7 +220,7 @@ public:
 
         unsigned int min_inliers_, max_nb_robots_, robot_id_, max_queue_size_,
             nb_local_keyframes_, map_manager_process_period_ms_;
-        rclcpp::Subscription<cslam_common_interfaces::msg::LocalKeyframeMatch>::SharedPtr recovery_subscriber_;
+        rclcpp::Subscription<cslam_common_interfaces::msg::InterRobotMatches>::SharedPtr recovery_subscriber_;
         rclcpp::Publisher<cslam_common_interfaces::msg::LocalKeyframeMatch>::SharedPtr add_recovered_publisher_;
 
         rclcpp::Subscription<

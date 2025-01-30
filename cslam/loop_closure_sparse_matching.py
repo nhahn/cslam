@@ -79,8 +79,7 @@ class LoopClosureSparseMatching(object):
 
     def match_local_loop_closures(self, descriptor, kf_id):
         tensor = torch.from_numpy(np.asarray(descriptor).astype(np.float32))
-        kfs, similarities = self.local_nnsm.search(tensor,
-                                         k=self.params['frontend.nb_best_matches'])
+        kfs, similarities = self.local_nnsm.search(tensor,k=self.params['frontend.nb_best_matches'])
         
         if len(kfs) > 0 and kfs[0] == kf_id:
             kfs, similarities = kfs[1:], similarities[1:]
@@ -97,7 +96,11 @@ class LoopClosureSparseMatching(object):
 
             return kf, similarities
         return None, similarities
-
+    
+    def find_recovery_candidates(self, descriptor, num=10):
+        tensor = torch.from_numpy(np.asarray(descriptor).astype(np.float32))
+        kfs, similarities = self.local_nnsm.search(tensor,k=num)
+        return kfs, similarities
     def select_candidates(self,
                           number_of_candidates,
                           is_neighbor_in_range,
