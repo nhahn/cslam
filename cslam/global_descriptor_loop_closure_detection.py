@@ -39,7 +39,7 @@ class GlobalDescriptorLoopClosureDetection(object):
         self.params = params
         self.node = node
         self.lcm = LoopClosureSparseMatching(params, node)
-        self.recovery_buffer = deque()
+        self.recovery_buffer = dict()
 
         # Place Recognition network setup
         if self.params['frontend.global_descriptor_technique'].lower(
@@ -153,15 +153,12 @@ class GlobalDescriptorLoopClosureDetection(object):
 
     def add_recovered_descriptor_to_map(self, msg):
         kf_id = msg.keyframe1_id
-        embed_pair = next((tup for tup in list(self.recovery_buffer) if tup[0] == msg.keyframe0_id), None)
-        if embed_pair is None: return
-        
-        self.recovery_buffer.remove(embed_pair) 
-        matches = self.lcm.add_local_global_descriptor(embed_pair[1], kf_id)
+        embedding = self.recovery_buffer[msg.keyframe0_id]
+        matches = self.lcm.add_local_global_descriptor(embedding, kf_id)
         msg = GlobalDescriptor()
         msg.keyframe_id = kf_id
         msg.robot_id = self.params['robot_id']
-        msg.descriptor = embed_pair[1].tolist()
+        msg.descriptor = embedding.tolist()
         self.global_descriptors_buffer[kf_id] = msg
 
         # Store matches
@@ -177,14 +174,8 @@ class GlobalDescriptorLoopClosureDetection(object):
             embedding (np.array): descriptor
             kf_id (int): keyframe ID
         """        
-        # If we don't have a larger KF signature -- we've lost tracking and are trying to find it
-        if (kf_id <= self.lcm.current_kf):
-            kf_id = self.recover_tracking(embedding)
-            if kf_id > 0: self.recovery_buffer.append((kf_id, embedding))
-            if len(self.recovery_buffer) > 20: self.recovery_buffer.popleft()
-            return
-        else:
-            self.detect_intra(embedding, kf_id)
+
+        self.detect_intra(embedding, kf_id)
         # Add for matching
         matches = self.lcm.add_local_global_descriptor(embedding, kf_id)
 
@@ -317,24 +308,6 @@ class GlobalDescriptorLoopClosureDetection(object):
                              value=str(
                                  self.log_detection_cumulative_communication)))
 
-    def recover_tracking(self, embedding):
-        """ Detect intra-robot loop closures
-
-        Args:
-            embedding (np.array): descriptor
-            kf_id (int): keyframe ID
-
-        Returns:
-            list(int): matched keyframes
-        """
-        frame_key = randint(0, 2147483647)
-        kfs, similarities = self.lcm.find_recovery_candidates(embedding)
-        msg = InterRobotMatches()
-        for kf_match in kfs:
-            msg.matches.append(InterRobotMatch(robot0_keyframe_id=kf_match, robot1_keyframe_id=frame_key))
-        self.odom_recovery_publisher.publish(msg)
-        return frame_key
-
     def detect_intra(self, embedding, kf_id):
         """ Detect intra-robot loop closures
 
@@ -435,8 +408,17 @@ class GlobalDescriptorLoopClosureDetection(object):
                 vertices[key1] = [[s.robot0_id], [s.robot0_keyframe_id]]
         return vertices
 
-    def receive_descriptor(self, msg):
-        self.add_global_descriptor_to_map(np.asarray(msg.descriptor), msg.keyframe_id)
+    def receive_descriptor(self, msg: GlobalDescriptor):
+        if msg.robot_id != 0:
+            self.recovery_buffer[kf_id] = embedding
+            # If we don't have a larger KF signature -- we've lost tracking and are trying to find it
+            kfs, similarities = self.lcm.find_recovery_candidates(embedding)
+            match_msg = InterRobotMatches()
+            for kf_match in kfs:
+                match_msg.matches.append(InterRobotMatch(robot0_keyframe_id=kf_match, robot1_keyframe_id=msg.keyframe_id))
+            self.odom_recovery_publisher.publish(match_msg)
+        else:
+            self.add_global_descriptor_to_map(np.asarray(msg.descriptor), msg.keyframe_id)
 
     def global_descriptor_callback(self, msg):
         """Callback for descriptors received from other robots.

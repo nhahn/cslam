@@ -17,7 +17,6 @@ SensorHandler::SensorHandler(rclcpp::Node * node) : node_(node) {
   node->declare_parameter<std::string>("frontend.odom_topic", "odom");
   node->get_parameter("frontend.use_external_odom", external_odom_);
   node->declare_parameter<float>("frontend.odom_sync_period", 0.1);
-  node->get_parameter("frontend.odom_sync_threshold", external_odom_);
   defaultCameraTransform = rtabmap::CameraModel::opticalRotation();
   rtabmap_conversions::transformToGeometryMsg(defaultCameraTransform, rosCameraTransform);
 

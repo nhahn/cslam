@@ -144,8 +144,8 @@ MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_
         std::bind(&MapManager::process_new_sensor_data, this), sensorDataCB);
 
     nb_local_keyframes_ = 0;
-    get_parameter("frontend.use_external_odom", external_odom_);
-    if (!external_odom_) {
+    odom_status = get_parameter("frontend.use_external_odom").as_bool()? OdomState::EXTERNAL : OdomState::GLOBAL_TRACKING;
+    if (odom_status != EXTERNAL) {
      rclcpp::SubscriptionOptions recoveryOptions;
      recoveryOptions.callback_group = sensorDataCB;
     
@@ -266,7 +266,6 @@ MapManager::MapManager(rclcpp::NodeOptions ops) : Node("map_manager", ops.start_
     }
 
     lastKFPose.setIdentity();
-    currentPose.setIdentity();
 
   RCLCPP_INFO(get_logger(), "Initialization done.");
 }
@@ -458,6 +457,13 @@ rtabmap::Transform MapManager::compute_flow(const std::shared_ptr<rtabmap::Senso
     return rtabmap::Transform();
   }
 
+void MapManager::publish_odom_update(const rtabmap::Transform &pose, const cv::Mat &covariance) {
+  if (odom_status == GLOBAL_TRACKING) {
+    covariance.reshape(1,1).copyTo(calcOdom.pose.covariance);
+    rtabmap_conversions::transformToPoseMsg(pose, calcOdom.pose.pose);
+    odom_publisher_->publish(calcOdom);
+  }
+}
 
 void MapManager::process_new_sensor_data()
 {
@@ -482,94 +488,100 @@ void MapManager::process_new_sensor_data()
     gps_fix = std::make_shared<sensor_msgs::msg::NavSatFix>(sensor_handler_->received_gps_queue_.back());
     sensor_handler_->received_gps_queue_.pop_back();
   }
-  const std::lock_guard<std::mutex> lock(current_pose_mutex);
+  calcOdom.header.stamp = rtabmap_conversions::timestampToROS(sensor_data->stamp());
+
   if (keyframe_generation_ratio_threshold_ < 0.99f && keyframe_generation_ratio_threshold_ > 0.001f && 
-      nb_local_keyframes_ > 0 && current_keyframe_) {
+      nb_local_keyframes_ > 0 && current_keyframe_ && odom_recovery_state != RECOVERY_FAILED) {
     rtabmap::RegistrationInfo reg_info;
     auto t = compute_flow(sensor_data, inputImg, reg_info);
     if (!t.isNull())
     {
-      //auto fluFrame = CameraModel::opticalRotation() * t * CameraModel::opticalRotation().inverse();
+      const std::lock_guard<std::mutex> lock(odom_state_mutex);
       auto newPose = lastKFPose * t;
-      if (!external_odom_ && !trackingLost) {
-          //if (newPose.getDistance(currentPose) > 0.005 || currentPose.getQuaternionf().angularDistance(newPose.getQuaternionf()) > 0.005) {
-            reg_info.covariance.reshape(1,1).copyTo(calcOdom.pose.covariance);
-            rtabmap_conversions::transformToPoseMsg(newPose, calcOdom.pose.pose);
-            //rtabmap_conversions::transformToGeometryMsg(newPose, odomTf.transform);
-            calcOdom.header.stamp = rtabmap_conversions::timestampToROS(sensor_data->stamp());
-            // calcOdom.child_frame_id = sensor_handler_->sensor_frame;
-            // odomTf.child_frame_id = sensor_handler_->sensor_frame;
-            //odomTf.header.stamp = calcOdom.header.stamp;
-            odom = std::make_shared<const nav_msgs::msg::Odometry>(calcOdom);
 
-            currentPose = newPose;
-          //}
-          odom_publisher_->publish(calcOdom);
-          //tf_broadcaster_->sendTransform(odomTf);
-      }
       RCLCPP_DEBUG(get_logger(), "New pose from internal tracking: %s", newPose.prettyPrint().c_str());
       float inliersRatio = (float) reg_info.inliers / (float) current_keyframe_->keypoints().size();
-      if ( inliersRatio > keyframe_generation_ratio_threshold_ )
+      if ( inliersRatio > keyframe_generation_ratio_threshold_)
       {
-        RCLCPP_DEBUG(get_logger(), "New KF not generated due to high number of inliers from pervious KF %d %f", reg_info.inliers,
+        RCLCPP_DEBUG(get_logger(), "Keeping OF FK due to high number of inliers from pervious KF %d %f", reg_info.inliers,
                         inliersRatio);
+        publish_odom_update(newPose, reg_info.covariance);
+        return;
+      } else if (odom_recovery_state == ATTEMPTING_RECOVERY) {
+        RCLCPP_DEBUG(get_logger(), "Keeping current KF due to recovery attempt");
+        publish_odom_update(newPose, reg_info.covariance);
         return;
       }
-      RCLCPP_DEBUG(get_logger(), "New KF to be generated - %d %f", reg_info.inliers, inliersRatio);
+      RCLCPP_DEBUG(get_logger(), "New OF frame -- not enought inliers %d %f", reg_info.inliers, inliersRatio);
     } else {
-      RCLCPP_DEBUG(get_logger(), "Couldnt compute f2f transform: inliers %d - ratio %f - matches %d", reg_info.inliers, reg_info.inliersRatio, reg_info.matches);
-      current_keyframe_ = nullptr;
-      lastKFPose.setIdentity();
-      currentPose.setIdentity();
-      trackingLost = !external_odom_;
+      RCLCPP_DEBUG(get_logger(), "Couldnt compute f2f transform with OF", reg_info.inliers, reg_info.inliersRatio, reg_info.matches);
     }
-  } else if (!external_odom_ && nb_local_keyframes_ == 0) {
-    calcOdom.header.stamp = rtabmap_conversions::timestampToROS(sensor_data->stamp());
-    odom = std::make_shared<const nav_msgs::msg::Odometry>(calcOdom);
-    currentPose.setIdentity();
-    sensor_data->setGlobalPose(currentPose, cv::Mat());
   }
-  if (compute_local_descriptors(sensor_data, inputImg)) {
+
+
+  if (compute_local_descriptors(sensor_data, inputImg)) 
   {
-      optical_matcher->updateBaseFrame(inputImg, sensor_data->keypoints());
-      if (current_keyframe_) {
-        rtabmap::RegistrationInfo reg_info;
-        auto signatures = this->computeMatches(*current_keyframe_, *sensor_data);
-        rtabmap::Transform t = intra_registration_->computeTransformation(
-            *signatures.first, *signatures.second, rtabmap::Transform(), &reg_info);
+    optical_matcher->updateBaseFrame(inputImg, sensor_data->keypoints());
+    const std::lock_guard<std::mutex> lock(odom_state_mutex);
+    if (odom_recovery_state == RECOVERY_FAILED) {
+      RCLCPP_DEBUG(get_logger(), "Recovery has failed -- purposefully sending a new KF");
+    } else if (current_keyframe_) {
+      rtabmap::RegistrationInfo reg_info;
+      auto signatures = this->computeMatches(*current_keyframe_, *sensor_data);
+      //RCLCPP_DEBUG(get_logger(), "Checking the matches computed transform");
+      rtabmap::Transform t = intra_registration_->computeTransformation(
+          *signatures.first, *signatures.second, rtabmap::Transform(), &reg_info);
+      if ( !t.isNull()) {
         lastKFPose = lastKFPose * t;
-        currentPose = lastKFPose;
-        sensor_data->setGlobalPose(currentPose.clone(), reg_info.covariance);
+        sensor_data->setGlobalPose(lastKFPose.clone(), reg_info.covariance);
         float inliersRatio = (float) reg_info.inliers / (float) current_keyframe_->keypoints().size();
-        if ( !t.isNull() && inliersRatio > keyframe_generation_ratio_threshold_ )
+        publish_odom_update(lastKFPose, reg_info.covariance);
+        if (inliersRatio > keyframe_generation_ratio_threshold_ )
         {
-          RCLCPP_DEBUG(get_logger(), "After feature matching -- frame still close to prev kf %d %f", reg_info.inliers,
+          RCLCPP_DEBUG(get_logger(), "After feature matching -- frame still close to prev kf %d %f. Keeping prev KF", reg_info.inliers,
                           inliersRatio);
           return;
+        } else if (odom_recovery_state == ATTEMPTING_RECOVERY) {
+          RCLCPP_DEBUG(get_logger(), "Keeping current KF due to recovery attempt");
+          return;
+        } else {
+          RCLCPP_DEBUG(get_logger(), "After feature matching -- frame not close to prev kf %d %f. Making new FK", reg_info.inliers,
+                inliersRatio);
         }
-      }
-
-      const std::lock_guard<std::mutex> lock(map_mutex);                 // Set keyframe ID
-      current_keyframe_ = sensor_data;
-      if (!trackingLost) {
-        sensor_data->setId(nb_local_keyframes_);
-        local_descriptors_map_.insert({sensor_data->id(), sensor_data});
-        nb_local_keyframes_++;
       } else {
-        sensor_data->setId(0);
-      }
+        lastKFPose.setIdentity();
+        if (odom_status != EXTERNAL) {
+          RCLCPP_DEBUG(get_logger(), "Couldnt compute f2f transform with FM: inliers %d - ratio %f - matches %d. Waiting for loop closure reset", reg_info.inliers, reg_info.inliersRatio, reg_info.matches);
+          odom_status = LOCAL_TRACKING;
+        }
+      } 
+    } else if (odom_status != EXTERNAL) {
+      odom_status = LOCAL_TRACKING;
     }
-    if (sensor_handler_->enable_gps_recording_) {
-      send_keyframe(std::make_pair(sensor_data, trackingLost? nullptr : odom), gps_fix.get());
+
+    const std::lock_guard<std::mutex> map_lock(map_mutex);                 // Set keyframe ID
+    current_keyframe_ = sensor_data;
+    if (odom_status == GLOBAL_TRACKING || odom_status == EXTERNAL) {
+      sensor_data->setId(nb_local_keyframes_);
+      local_descriptors_map_.insert({sensor_data->id(), sensor_data});
+      nb_local_keyframes_++;
     } else {
-      // Send keyframe for loop detection
-      send_keyframe(std::make_pair(sensor_data, trackingLost? nullptr : odom), nullptr);
+      odom_recovery_state = ATTEMPTING_RECOVERY;
+      sensor_data->setId(recoveryFrameId++);
     }
-    
+    if (odom_status == GLOBAL_TRACKING) {
+      odom = std::make_shared<const nav_msgs::msg::Odometry>(calcOdom);
+    }
+    send_keyframe(std::make_pair(sensor_data, 
+      (odom_status == GLOBAL_TRACKING || odom_status == EXTERNAL)? odom : nullptr), 
+      sensor_handler_->enable_gps_recording_? gps_fix.get() : nullptr);
+  } else {
+    const std::lock_guard<std::mutex> lock(odom_state_mutex);
+    current_keyframe_ = nullptr;
+    lastKFPose.setIdentity();
+    odom_status == FAILURE;
   }
   clear_sensor_data(sensor_data);
-  
-
 }
 
 void MapManager::sensor_data_to_rgbd_msg(
@@ -617,11 +629,11 @@ void MapManager::local_descriptors_request(
 
 void MapManager::recover_odom_pose(cslam_common_interfaces::msg::InterRobotMatches::ConstSharedPtr matches) {
   for(const auto match : matches->matches) {
-    
     std::shared_ptr<rtabmap::SensorData> currentKF, matching_kf;
     {
-      const std::lock_guard<std::mutex> pose_lock(current_pose_mutex);
-      if (!trackingLost || !current_keyframe_) return;
+      const std::lock_guard<std::mutex> odom_state_lock(odom_state_mutex);
+      const std::lock_guard<std::mutex> map_lock(map_mutex);
+      if (odom_status != LOCAL_TRACKING || current_keyframe_->id() != match.robot1_keyframe_id) return;
       currentKF = current_keyframe_;
       matching_kf = local_descriptors_map_.at(match.robot0_keyframe_id);
     }
@@ -629,8 +641,8 @@ void MapManager::recover_odom_pose(cslam_common_interfaces::msg::InterRobotMatch
     rtabmap::RegistrationInfo reg_info;
     rtabmap::Transform t = intra_registration_->computeTransformation(
                 *signatures.first, *signatures.second, rtabmap::Transform(), &reg_info);
-    const std::lock_guard<std::mutex> pose_lock(current_pose_mutex);
-    if (!t.isNull() && current_keyframe_ && currentKF->stamp() == current_keyframe_->stamp()) {
+    const std::lock_guard<std::mutex> lock(odom_state_mutex);
+    if (!t.isNull() && current_keyframe_ && current_keyframe_->id() == match.robot1_keyframe_id) {
       //TODO be smarter about this -- we should be able to reuse the new map we're constructing
       // t.normalizeRotation();
       auto fromPose = matching_kf->globalPose();
@@ -640,7 +652,8 @@ void MapManager::recover_odom_pose(cslam_common_interfaces::msg::InterRobotMatch
         const std::lock_guard<std::mutex> map_lock(map_mutex); 
         RCLCPP_DEBUG(get_logger(), "Tracking was lost -- resetting pose based on loop closure: %s", newKFPose.prettyPrint().c_str());
         lastKFPose = newKFPose;
-        trackingLost = false;
+        odom_status = GLOBAL_TRACKING;
+        odom_recovery_state = RECOVERED;
         current_keyframe_->setGlobalPose(newKFPose, reg_info.covariance);
         current_keyframe_->setId(nb_local_keyframes_);
         local_descriptors_map_.insert({current_keyframe_->id(), current_keyframe_});
@@ -662,8 +675,10 @@ void MapManager::recover_odom_pose(cslam_common_interfaces::msg::InterRobotMatch
     } else {
       RCLCPP_DEBUG(get_logger(), "Could not re-align tracking based on new KF -- attempting next");
     }
-    RCLCPP_DEBUG(get_logger(), "Could not align to any previous keyframes");
   }
+  const std::lock_guard<std::mutex> lock(odom_state_mutex);
+  RCLCPP_DEBUG(get_logger(), "Could not align to any previous keyframes");
+  odom_recovery_state = RECOVERY_FAILED;
 }
 
 void MapManager::receive_local_keyframe_match(
@@ -701,8 +716,8 @@ void MapManager::receive_local_keyframe_match(
               if (!t.isNull())
               {
                 // t.normalizeRotation();
-                const std::lock_guard<std::mutex> pose_lock(current_pose_mutex);
-                if (!external_odom_ && msg->keyframe1_id == current_keyframe_->id()) {
+                const std::lock_guard<std::mutex> pose_lock(odom_state_mutex);
+                if (odom_status != EXTERNAL && msg->keyframe1_id == current_keyframe_->id()) {
                   lastKFPose = keyframe0->globalPose().isNull()? t : keyframe0->globalPose() * t;
                 }
                 lc->success = true;
@@ -854,10 +869,11 @@ void MapManager::send_keyframe(const std::pair<std::shared_ptr<rtabmap::SensorDa
   cv_bridge::CvImage image_bridge = cv_bridge::CvImage(header, img.channels() > 1? "bgr8":"mono8",img);
   auto keyframe_msg = std::make_unique<cslam_common_interfaces::msg::KeyframeRGB>();
   image_bridge.toImageMsg(keyframe_msg->image);
+  keyframe_msg->image.header.frame_id = (odom_status == GLOBAL_TRACKING || odom_status == EXTERNAL)? "global" : "local";
   keyframe_msg->id = keypoints_data.first->id();
   keyframe_data_publisher_->publish(std::move(keyframe_msg));
 
-  if (keypoints_data.second != nullptr) {
+  if (odom_status == GLOBAL_TRACKING || odom_status == EXTERNAL) {
     auto odom_msg = std::make_unique<cslam_common_interfaces::msg::KeyframeOdom>();
     odom_msg->id = keypoints_data.first->id();
     odom_msg->odom = *keypoints_data.second;

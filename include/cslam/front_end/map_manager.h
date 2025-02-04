@@ -213,8 +213,7 @@ public:
         std::string sensor_type;
         std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
-        rtabmap::Transform lastKFPose, currentPose;
-        bool trackingLost = false;
+        rtabmap::Transform lastKFPose, currentLocalPose;
 
         std::map<int, std::shared_ptr<rtabmap::SensorData>> local_descriptors_map_;
 
@@ -271,7 +270,7 @@ public:
             diagnostic_msgs::msg::KeyValue>::SharedPtr
             log_publisher_;
         unsigned int log_total_local_descriptors_cumulative_communication_;
-        bool enable_logs_, external_odom_;
+        bool enable_logs_;
 
         float keyframe_generation_ratio_threshold_;
         int min_3d_keypoints_;
@@ -287,12 +286,28 @@ public:
         lightglue::Configuration lightglueConfig;
         std::shared_ptr<OpticalFlow> optical_matcher;
     private:
+        enum OdomState {
+            GLOBAL_TRACKING,
+            LOCAL_TRACKING,
+            EXTERNAL,
+            FAILURE
+        };
+
+        enum OdomRecoveryState {
+            RECOVERED,
+            ATTEMPTING_RECOVERY,
+            RECOVERY_FAILED
+        };
+
+        OdomState odom_status = GLOBAL_TRACKING;
+        OdomRecoveryState odom_recovery_state = RECOVERED;
+        uint recoveryFrameId = 0;
         cv::Mat keypointViz, matchesViz;
 
 
         nav_msgs::msg::Odometry calcOdom;
         geometry_msgs::msg::TransformStamped odomTf;
-        
+        void publish_odom_update(const rtabmap::Transform &pose, const cv::Mat &covariance);
         rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
         std::shared_ptr<SensorHandler> sensor_handler_ {nullptr};
         rclcpp::CallbackGroup::SharedPtr sensorDataCB;
@@ -300,7 +315,7 @@ public:
         std::pair<std::shared_ptr<rtabmap::Signature>, std::shared_ptr<rtabmap::Signature>> computeMatches(const rtabmap::SensorData& from, const rtabmap::SensorData& to);
         rtabmap::ParametersMap rtabmap_parameters;
         sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_;
-        std::mutex map_mutex, prev_frame_mutex, current_pose_mutex;
+        std::mutex map_mutex, curent_kf_mutex, odom_state_mutex;
         ThreadPool workerPool;
         //ThreadPool keypointExtractorPool, matcherPool, poseEstimatorPool;
   

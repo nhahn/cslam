@@ -70,6 +70,7 @@ namespace cslam {
 					globalDescriptorMsg->descriptor.push_back(embedding[i]);
 				}
 				globalDescriptorMsg->keyframe_id = keyframe_msg->id; 
+				globalDescriptorMsg->robot_id = keyframe_msg->image.header.frame_id == "global"? 0 : 1;
 				global_descriptor_publisher->publish(std::move(globalDescriptorMsg));
 			} catch (const std::exception &ex)
 			{
