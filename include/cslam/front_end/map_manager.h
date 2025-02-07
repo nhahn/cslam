@@ -299,9 +299,9 @@ public:
             RECOVERY_FAILED
         };
 
-        OdomState odom_status = GLOBAL_TRACKING;
-        OdomRecoveryState odom_recovery_state = RECOVERED;
-        uint recoveryFrameId = 0;
+        std::atomic<OdomState> odom_status {GLOBAL_TRACKING};
+        std::atomic<OdomRecoveryState> odom_recovery_state {RECOVERED};
+        std::atomic<uint> recoveryFrameId {0};
         cv::Mat keypointViz, matchesViz;
 
 

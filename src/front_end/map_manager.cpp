@@ -280,7 +280,7 @@ bool MapManager::compute_local_descriptors(
 
   try {
     
-    auto extData = lightglueMatcher->Extractor(lightglueConfig, img);
+    auto extData = lightglueMatcher->Extractor(lightglueConfig, img, frame_data->depthRaw());
     std::vector<cv::Point3f> kpts3D = detector_->generateKeypoints3D(*frame_data, extData.first);
     int valid3DKpts = 0;
     for(size_t i = 0; i < kpts3D.size(); i++) {
@@ -489,6 +489,7 @@ void MapManager::process_new_sensor_data()
     sensor_handler_->received_gps_queue_.pop_back();
   }
   calcOdom.header.stamp = rtabmap_conversions::timestampToROS(sensor_data->stamp());
+  const std::lock_guard<std::mutex> lock(odom_state_mutex);
 
   if (keyframe_generation_ratio_threshold_ < 0.99f && keyframe_generation_ratio_threshold_ > 0.001f && 
       nb_local_keyframes_ > 0 && current_keyframe_ && odom_recovery_state != RECOVERY_FAILED) {
@@ -496,7 +497,6 @@ void MapManager::process_new_sensor_data()
     auto t = compute_flow(sensor_data, inputImg, reg_info);
     if (!t.isNull())
     {
-      const std::lock_guard<std::mutex> lock(odom_state_mutex);
       auto newPose = lastKFPose * t;
 
       RCLCPP_DEBUG(get_logger(), "New pose from internal tracking: %s", newPose.prettyPrint().c_str());
@@ -522,7 +522,6 @@ void MapManager::process_new_sensor_data()
   if (compute_local_descriptors(sensor_data, inputImg)) 
   {
     optical_matcher->updateBaseFrame(inputImg, sensor_data->keypoints());
-    const std::lock_guard<std::mutex> lock(odom_state_mutex);
     if (odom_recovery_state == RECOVERY_FAILED) {
       RCLCPP_DEBUG(get_logger(), "Recovery has failed -- purposefully sending a new KF");
     } else if (current_keyframe_) {
@@ -559,9 +558,9 @@ void MapManager::process_new_sensor_data()
       odom_status = LOCAL_TRACKING;
     }
 
-    const std::lock_guard<std::mutex> map_lock(map_mutex);                 // Set keyframe ID
     current_keyframe_ = sensor_data;
     if (odom_status == GLOBAL_TRACKING || odom_status == EXTERNAL) {
+      const std::lock_guard<std::mutex> map_lock(map_mutex);                 // Set keyframe ID
       sensor_data->setId(nb_local_keyframes_);
       local_descriptors_map_.insert({sensor_data->id(), sensor_data});
       nb_local_keyframes_++;
@@ -576,7 +575,6 @@ void MapManager::process_new_sensor_data()
       (odom_status == GLOBAL_TRACKING || odom_status == EXTERNAL)? odom : nullptr), 
       sensor_handler_->enable_gps_recording_? gps_fix.get() : nullptr);
   } else {
-    const std::lock_guard<std::mutex> lock(odom_state_mutex);
     current_keyframe_ = nullptr;
     lastKFPose.setIdentity();
     odom_status == FAILURE;
@@ -716,8 +714,8 @@ void MapManager::receive_local_keyframe_match(
               if (!t.isNull())
               {
                 // t.normalizeRotation();
-                const std::lock_guard<std::mutex> pose_lock(odom_state_mutex);
                 if (odom_status != EXTERNAL && msg->keyframe1_id == current_keyframe_->id()) {
+                  const std::lock_guard<std::mutex> pose_lock(odom_state_mutex);
                   lastKFPose = keyframe0->globalPose().isNull()? t : keyframe0->globalPose() * t;
                 }
                 lc->success = true;
@@ -826,10 +824,6 @@ void MapManager::receive_local_image_descriptors(
                         "Inter-robot loop closure failed between (%d,%d) and (%d,%d): %s \n Mean Distance: %f, total time: %f",
                         lc->robot0_id, lc->robot0_keyframe_id, lc->robot1_id, lc->robot1_keyframe_id,
                         reg_info.rejectedMsg.c_str(), reg_info.inliersMeanDistance, reg_info.totalTime);
-                    RCLCPP_INFO(get_logger(), "There were the matches: Words %lu -> %lu, Kpts %lu -> %lu, 3D Kpts %lu -> %lu",
-                     signatures.first->getWords().size(),  signatures.second->getWords().size(), 
-                     signatures.first->getWordsKpts().size(), signatures.second->getWordsKpts().size(),
-                     signatures.first->getWords3().size(), signatures.second->getWords3().size());
 
                   }
                   inter_robot_loop_closure_publisher_->publish(std::move(lc));
