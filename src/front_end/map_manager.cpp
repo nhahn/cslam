@@ -390,7 +390,7 @@ std::pair<std::shared_ptr<rtabmap::Signature>, std::shared_ptr<rtabmap::Signatur
 rtabmap::Transform MapManager::compute_flow(const std::shared_ptr<rtabmap::SensorData> newData, const cv::Mat& toImg, rtabmap::RegistrationInfo &reg_info)
 {
     PROFILE_ME;
-    auto from = std::make_shared<rtabmap::Signature>(*current_keyframe_), to = std::make_shared<rtabmap::Signature>(*newData);
+    auto from = std::make_shared<rtabmap::Signature>(*current_OF_frame_), to = std::make_shared<rtabmap::Signature>(*newData);
     from->sensorData().clearRawData();     to->sensorData().clearRawData();
     from->sensorData().clearCompressedData(); to->sensorData().clearCompressedData();
     std::multimap<int, int> wordsFrom;
@@ -399,10 +399,10 @@ rtabmap::Transform MapManager::compute_flow(const std::shared_ptr<rtabmap::Senso
     std::vector<cv::KeyPoint> wordsKptsTo;
     std::vector<cv::Point3f> words3From;
     std::vector<cv::Point3f> words3To;
-    std::vector<cv::KeyPoint> kptsTo(current_keyframe_->keypoints().size());
-    std::vector<cv::KeyPoint> kptsFrom = current_keyframe_->keypoints();
-    std::vector<cv::Point3f> kptsFrom3D = current_keyframe_->keypoints3D();
-    std::vector<cv::Point3f> kptsFrom3DKept(current_keyframe_->keypoints3D().size());
+    std::vector<cv::KeyPoint> kptsTo(current_OF_frame_->keypoints().size());
+    std::vector<cv::KeyPoint> kptsFrom = current_OF_frame_->keypoints();
+    std::vector<cv::Point3f> kptsFrom3D = current_OF_frame_->keypoints3D();
+    std::vector<cv::Point3f> kptsFrom3DKept(current_OF_frame_->keypoints3D().size());
     int ki = 0;
     auto matches = optical_matcher->matchNextFrame(toImg);
     if (!matches.size()) return rtabmap::Transform();
@@ -413,17 +413,19 @@ rtabmap::Transform MapManager::compute_flow(const std::shared_ptr<rtabmap::Senso
           uIsInBounds(matches[i].second.x, 0.0f, float(toImg.cols)) &&
           uIsInBounds(matches[i].second.y, 0.0f, float(toImg.rows)))
       {
-        kptsFrom[ki] = cv::KeyPoint(current_keyframe_->keypoints()[i].pt, 1);
+        kptsFrom[ki] = cv::KeyPoint(current_OF_frame_->keypoints()[i].pt, 1);
         kptsFrom3DKept[ki] = kptsFrom3D[i];
         kptsTo[ki++] = cv::KeyPoint(matches[i].second, 1);
       }
     }
-    if (ki < f2f_registration_->getMinInliers())
-      return rtabmap::Transform();
-
     RCLCPP_DEBUG(
       get_logger(),
-      "Optical flow matches: %d - from previous kf %d", ki, current_keyframe_->id());
+      "Optical flow matches: %d", ki);
+
+    if (ki < f2f_registration_->getMinInliers()) {
+      return rtabmap::Transform();
+    }
+
     kptsFrom.resize(ki);
     kptsTo.resize(ki);
     kptsFrom3DKept.resize(ki);
@@ -451,7 +453,7 @@ rtabmap::Transform MapManager::compute_flow(const std::shared_ptr<rtabmap::Senso
     {
       RCLCPP_WARN(
           get_logger(),
-          "Exception: Could not compute transformation for keyframe generation: %s -- from words %lu words3 %lu : to words %lu words3 %lu",
+          "Exception: OF transform not computable: %s -- from words %lu words3 %lu : to words %lu words3 %lu",
           e.what(), from->getWords().size(), from->getWords3().size(), to->getWords().size(), to->getWords3().size());
     }
     return rtabmap::Transform();
@@ -492,7 +494,7 @@ void MapManager::process_new_sensor_data()
   const std::lock_guard<std::mutex> lock(odom_state_mutex);
 
   if (keyframe_generation_ratio_threshold_ < 0.99f && keyframe_generation_ratio_threshold_ > 0.001f && 
-      nb_local_keyframes_ > 0 && current_keyframe_ && odom_recovery_state != RECOVERY_FAILED) {
+      nb_local_keyframes_ > 0 && current_keyframe_ && current_OF_frame_ && odom_recovery_state != RECOVERY_FAILED) {
     rtabmap::RegistrationInfo reg_info;
     auto t = compute_flow(sensor_data, inputImg, reg_info);
     if (!t.isNull())
@@ -514,50 +516,60 @@ void MapManager::process_new_sensor_data()
       }
       RCLCPP_DEBUG(get_logger(), "New OF frame -- not enought inliers %d %f", reg_info.inliers, inliersRatio);
     } else {
-      RCLCPP_DEBUG(get_logger(), "Couldnt compute f2f transform with OF", reg_info.inliers, reg_info.inliersRatio, reg_info.matches);
+      RCLCPP_DEBUG(get_logger(), "Couldn't compute f2f transform with OF");
     }
   }
 
 
-  if (compute_local_descriptors(sensor_data, inputImg)) 
-  {
+  if (compute_local_descriptors(sensor_data, inputImg)) {
     optical_matcher->updateBaseFrame(inputImg, sensor_data->keypoints());
+    current_OF_frame_ = sensor_data;
     if (odom_recovery_state == RECOVERY_FAILED) {
       RCLCPP_DEBUG(get_logger(), "Recovery has failed -- purposefully sending a new KF");
     } else if (current_keyframe_) {
       rtabmap::RegistrationInfo reg_info;
       auto signatures = this->computeMatches(*current_keyframe_, *sensor_data);
-      //RCLCPP_DEBUG(get_logger(), "Checking the matches computed transform");
-      rtabmap::Transform t = intra_registration_->computeTransformation(
-          *signatures.first, *signatures.second, rtabmap::Transform(), &reg_info);
-      if ( !t.isNull()) {
-        lastKFPose = lastKFPose * t;
-        sensor_data->setGlobalPose(lastKFPose.clone(), reg_info.covariance);
-        float inliersRatio = (float) reg_info.inliers / (float) current_keyframe_->keypoints().size();
-        publish_odom_update(lastKFPose, reg_info.covariance);
-        if (inliersRatio > keyframe_generation_ratio_threshold_ )
-        {
-          RCLCPP_DEBUG(get_logger(), "After feature matching -- frame still close to prev kf %d %f. Keeping prev KF", reg_info.inliers,
-                          inliersRatio);
-          return;
-        } else if (odom_recovery_state == ATTEMPTING_RECOVERY) {
-          RCLCPP_DEBUG(get_logger(), "Keeping current KF due to recovery attempt");
-          return;
+      try {
+        //RCLCPP_DEBUG(get_logger(), "Checking the matches computed transform");
+        rtabmap::Transform t = intra_registration_->computeTransformation(
+            *signatures.first, *signatures.second, rtabmap::Transform(), &reg_info);
+        if ( !t.isNull()) {
+          lastKFPose = lastKFPose * t;
+          sensor_data->setGlobalPose(lastKFPose.clone(), reg_info.covariance);
+          float inliersRatio = (float) reg_info.inliers / (float) current_keyframe_->keypoints().size();
+          publish_odom_update(lastKFPose, reg_info.covariance);
+          if (inliersRatio > keyframe_generation_ratio_threshold_ )
+          {
+            RCLCPP_DEBUG(get_logger(), "After feature matching -- frame still close to prev kf %d %f. Keeping prev KF", reg_info.inliers,
+                            inliersRatio);
+            return;
+          } else if (odom_recovery_state == ATTEMPTING_RECOVERY) {
+            RCLCPP_DEBUG(get_logger(), "Keeping current KF due to recovery attempt");
+            return;
+          } else {
+            RCLCPP_DEBUG(get_logger(), "After feature matching -- frame not close to prev kf %d %f. Making new FK", reg_info.inliers,
+                  inliersRatio);
+          }
         } else {
-          RCLCPP_DEBUG(get_logger(), "After feature matching -- frame not close to prev kf %d %f. Making new FK", reg_info.inliers,
-                inliersRatio);
-        }
-      } else {
-        lastKFPose.setIdentity();
-        if (odom_status != EXTERNAL) {
-          RCLCPP_DEBUG(get_logger(), "Couldnt compute f2f transform with FM: inliers %d - ratio %f - matches %d. Waiting for loop closure reset", reg_info.inliers, reg_info.inliersRatio, reg_info.matches);
-          odom_status = LOCAL_TRACKING;
-        }
-      } 
+          lastKFPose.setIdentity();
+          if (odom_status != EXTERNAL) {
+            RCLCPP_DEBUG(get_logger(), "Couldnt compute f2f transform with FM: inliers %d - ratio %f - matches %d. Waiting for loop closure reset", reg_info.inliers, reg_info.inliersRatio, reg_info.matches);
+            odom_status = LOCAL_TRACKING;
+          }
+        } 
+      }
+      catch (std::exception &e)
+      {
+        RCLCPP_WARN(
+            get_logger(),
+            "Exception: Could not compute transform between keyframes: %s -- from words %lu words3 %lu : to words %lu words3 %lu",
+            e.what(), signatures.first->getWords().size(), signatures.first->getWords3().size(), signatures.second->getWords().size(), signatures.second->getWords3().size());
+        if (odom_status != EXTERNAL) odom_status = LOCAL_TRACKING;
+      }
     } else if (odom_status != EXTERNAL) {
       odom_status = LOCAL_TRACKING;
     }
-
+    
     current_keyframe_ = sensor_data;
     if (odom_status == GLOBAL_TRACKING || odom_status == EXTERNAL) {
       const std::lock_guard<std::mutex> map_lock(map_mutex);                 // Set keyframe ID
@@ -568,16 +580,18 @@ void MapManager::process_new_sensor_data()
       odom_recovery_state = ATTEMPTING_RECOVERY;
       sensor_data->setId(recoveryFrameId++);
     }
+
     if (odom_status == GLOBAL_TRACKING) {
       odom = std::make_shared<const nav_msgs::msg::Odometry>(calcOdom);
     }
+    
     send_keyframe(std::make_pair(sensor_data, 
       (odom_status == GLOBAL_TRACKING || odom_status == EXTERNAL)? odom : nullptr), 
       sensor_handler_->enable_gps_recording_? gps_fix.get() : nullptr);
   } else {
     current_keyframe_ = nullptr;
     lastKFPose.setIdentity();
-    odom_status == FAILURE;
+    odom_status = FAILURE;
   }
   clear_sensor_data(sensor_data);
 }
@@ -631,7 +645,7 @@ void MapManager::recover_odom_pose(cslam_common_interfaces::msg::InterRobotMatch
     {
       const std::lock_guard<std::mutex> odom_state_lock(odom_state_mutex);
       const std::lock_guard<std::mutex> map_lock(map_mutex);
-      if (odom_status != LOCAL_TRACKING || current_keyframe_->id() != match.robot1_keyframe_id) return;
+      if (odom_status != LOCAL_TRACKING || current_keyframe_->id() != (int) match.robot1_keyframe_id) return;
       currentKF = current_keyframe_;
       matching_kf = local_descriptors_map_.at(match.robot0_keyframe_id);
     }
@@ -640,7 +654,7 @@ void MapManager::recover_odom_pose(cslam_common_interfaces::msg::InterRobotMatch
     rtabmap::Transform t = intra_registration_->computeTransformation(
                 *signatures.first, *signatures.second, rtabmap::Transform(), &reg_info);
     const std::lock_guard<std::mutex> lock(odom_state_mutex);
-    if (!t.isNull() && current_keyframe_ && current_keyframe_->id() == match.robot1_keyframe_id) {
+    if (!t.isNull() && current_keyframe_ && current_keyframe_->id() == (int) match.robot1_keyframe_id) {
       //TODO be smarter about this -- we should be able to reuse the new map we're constructing
       // t.normalizeRotation();
       auto fromPose = matching_kf->globalPose();
@@ -714,7 +728,7 @@ void MapManager::receive_local_keyframe_match(
               if (!t.isNull())
               {
                 // t.normalizeRotation();
-                if (odom_status != EXTERNAL && msg->keyframe1_id == current_keyframe_->id()) {
+                if (odom_status != EXTERNAL && (int) msg->keyframe1_id == current_keyframe_->id()) {
                   const std::lock_guard<std::mutex> pose_lock(odom_state_mutex);
                   lastKFPose = keyframe0->globalPose().isNull()? t : keyframe0->globalPose() * t;
                 }

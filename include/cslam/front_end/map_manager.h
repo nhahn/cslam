@@ -210,6 +210,7 @@ public:
     protected:
         rclcpp::TimerBase::SharedPtr process_timer_;
         std::shared_ptr<rtabmap::SensorData> current_keyframe_;
+        std::shared_ptr<rtabmap::SensorData> current_OF_frame_;
         std::string sensor_type;
         std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
