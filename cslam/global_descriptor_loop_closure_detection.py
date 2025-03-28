@@ -410,9 +410,9 @@ class GlobalDescriptorLoopClosureDetection(object):
 
     def receive_descriptor(self, msg: GlobalDescriptor):
         if msg.robot_id != 0:
-            self.recovery_buffer[kf_id] = embedding
+            self.recovery_buffer[kf_id] = msg.descriptor
             # If we don't have a larger KF signature -- we've lost tracking and are trying to find it
-            kfs, similarities = self.lcm.find_recovery_candidates(embedding)
+            kfs, similarities = self.lcm.find_recovery_candidates(msg.descriptor)
             match_msg = InterRobotMatches()
             for kf_match in kfs:
                 match_msg.matches.append(InterRobotMatch(robot0_keyframe_id=kf_match, robot1_keyframe_id=msg.keyframe_id))
