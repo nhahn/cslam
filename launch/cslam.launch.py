@@ -26,7 +26,7 @@ def launch_setup(context, *args, **kwargs):
                             #    prefix=['stdbuf -o L'],
                             #    output='screen',
                             #   prefix="pprofile -o cslam.pprofile",
-                                arguments=['--ros-args','--log-level',LaunchConfiguration('log_level'),'--log-level','rcl:=INFO', '--log-level','rmw_zenoh_cpp:=FATAL'],
+                                arguments=['--ros-args','--log-level',LaunchConfiguration('log_level'),'--log-level','rcl:=INFO'],
                                namespace=LaunchConfiguration('namespace'))
 
     pose_graph_manager_component = ComposableNode(
@@ -87,7 +87,7 @@ def launch_setup(context, *args, **kwargs):
                 name='map_container',
                 package='rclcpp_components',
                 executable='component_container_mt',
-                arguments=['--ros-args','--log-level',LaunchConfiguration('log_level'),'--log-level','rcl:=INFO', '--log-level','rmw_zenoh_cpp:=FATAL'],
+                arguments=['--ros-args','--log-level',LaunchConfiguration('log_level'),'--log-level','rcl:=INFO'],
                 composable_node_descriptions=[global_descriptor_component, map_manager],
                 prefix=['stdbuf -o L'],
                 output='screen',
@@ -98,7 +98,7 @@ def launch_setup(context, *args, **kwargs):
                 name='pose_container',
                 package='rclcpp_components',
                 executable='component_container_mt',
-                arguments=['--ros-args','--log-level',LaunchConfiguration('log_level'),'--log-level','rcl:=INFO', '--log-level','rmw_zenoh_cpp:=FATAL'],
+                arguments=['--ros-args','--log-level',LaunchConfiguration('log_level'),'--log-level','rcl:=INFO'],
                 composable_node_descriptions=[pose_graph_manager_component],
                 prefix=['stdbuf -o L'],
                 output='screen',

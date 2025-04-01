@@ -493,6 +493,8 @@ void MapManager::process_new_sensor_data()
   calcOdom.header.stamp = rtabmap_conversions::timestampToROS(sensor_data->stamp());
   const std::lock_guard<std::mutex> lock(odom_state_mutex);
 
+  RCLCPP_DEBUG(get_logger(), "Processing new frame");
+
   if (keyframe_generation_ratio_threshold_ < 0.99f && keyframe_generation_ratio_threshold_ > 0.001f && 
       nb_local_keyframes_ > 0 && current_keyframe_ && current_OF_frame_ && odom_recovery_state != RECOVERY_FAILED) {
     rtabmap::RegistrationInfo reg_info;
