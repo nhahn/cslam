@@ -279,7 +279,6 @@ bool MapManager::compute_local_descriptors(
   PROFILE_ME;
 
   try {
-    
     auto extData = lightglueMatcher->Extractor(lightglueConfig, img, frame_data->depthRaw());
     std::vector<cv::Point3f> kpts3D = detector_->generateKeypoints3D(*frame_data, extData.first);
     int valid3DKpts = 0;
@@ -306,7 +305,7 @@ bool MapManager::compute_local_descriptors(
     //Reduce our descriptor size here for easier storage and transmission
     cv::Mat fp16descriptors;
     extData.second.convertTo(fp16descriptors, CV_16F);
-    //RCLCPP_INFO(get_logger(), "Data about things %d %d %d", keypoints.size(), descriptors.rows, kpts3D.size());
+    //RCLCPP_DEBUG(get_logger(), "Setting keypoint data %lu %d %lu", extData.first.size(), fp16descriptors.rows, kpts3D.size());
     frame_data->setFeatures(extData.first, kpts3D, fp16descriptors);
   } catch (std::exception &e) {
     RCLCPP_ERROR(get_logger(),"Error extracting keypoints for keyframe %s", e.what());
@@ -327,6 +326,7 @@ bool MapManager::setMatches(rtabmap::Signature &from, rtabmap::Signature &to) {
 
   std::vector<cv::DMatch> matches;
   try {
+    //RCLCPP_DEBUG(get_logger(), "Sending to matcher");
     //Query = TO keypoints, Train = FROM Keypoints
     matches = lightglueMatcher->Matcher(lightglueConfig, kptsTo, kptsFrom, descriptorsTo, descriptorsFrom, toModel.imageSize(), fromModel.imageSize());
   } catch (std::exception &e) {
@@ -368,8 +368,8 @@ bool MapManager::setMatches(rtabmap::Signature &from, rtabmap::Signature &to) {
     words3To.push_back(kptsTo3DKept[i]);
   }
 
-  RCLCPP_DEBUG(get_logger(), "Found the following matches: Words %lu -> %lu, Kpts %lu -> %lu, 3D Kpts %lu -> %lu", wordsFrom.size(), wordsTo.size(), wordsKptsFrom.size(),
-      wordsKptsTo.size(), words3From.size(), words3To.size());
+  // RCLCPP_DEBUG(get_logger(), "Found the following matches: Words %lu -> %lu, Kpts %lu -> %lu, 3D Kpts %lu -> %lu", wordsFrom.size(), wordsTo.size(), wordsKptsFrom.size(),
+  //     wordsKptsTo.size(), words3From.size(), words3To.size());
   from.setWords(wordsFrom, wordsKptsFrom, words3From, cv::Mat());
   to.setWords(wordsTo, wordsKptsTo, words3To, cv::Mat());
   return true;
@@ -418,9 +418,7 @@ rtabmap::Transform MapManager::compute_flow(const std::shared_ptr<rtabmap::Senso
         kptsTo[ki++] = cv::KeyPoint(matches[i].second, 1);
       }
     }
-    RCLCPP_DEBUG(
-      get_logger(),
-      "Optical flow matches: %d", ki);
+    //RCLCPP_DEBUG(get_logger(), "Optical flow matches: %d", ki);
 
     if (ki < f2f_registration_->getMinInliers()) {
       return rtabmap::Transform();
@@ -461,6 +459,7 @@ rtabmap::Transform MapManager::compute_flow(const std::shared_ptr<rtabmap::Senso
 
 void MapManager::publish_odom_update(const rtabmap::Transform &pose, const cv::Mat &covariance) {
   if (odom_status == GLOBAL_TRACKING) {
+    RCLCPP_DEBUG(get_logger(), "New pose from internal tracking: %s", pose.prettyPrint().c_str());
     covariance.reshape(1,1).copyTo(calcOdom.pose.covariance);
     rtabmap_conversions::transformToPoseMsg(pose, calcOdom.pose.pose);
     odom_publisher_->publish(calcOdom);
@@ -474,7 +473,10 @@ void MapManager::process_new_sensor_data()
   auto pair = sensor_handler_->getNextPair();
   auto sensor_data = pair.first;
   auto odom = pair.second;
-  if (!sensor_data) return;
+  if (!sensor_data) {
+    RCLCPP_INFO(get_logger(), "Sensor Data queue empty...");
+    return;
+  }
   if (!lightglueMatcher) { //On our first bit of sensor data, initialize the lightglue matcher with the image dimensions
     lightglueMatcher = std::make_shared<lightglue::LightGlueOnnxRunner>();
     lightglueConfig.extractorImageDims.width = sensor_data->imageRaw().cols;
@@ -491,10 +493,8 @@ void MapManager::process_new_sensor_data()
     sensor_handler_->received_gps_queue_.pop_back();
   }
   calcOdom.header.stamp = rtabmap_conversions::timestampToROS(sensor_data->stamp());
+  // RCLCPP_DEBUG(get_logger(), "Processing new frame");
   const std::lock_guard<std::mutex> lock(odom_state_mutex);
-
-  RCLCPP_DEBUG(get_logger(), "Processing new frame");
-
   if (keyframe_generation_ratio_threshold_ < 0.99f && keyframe_generation_ratio_threshold_ > 0.001f && 
       nb_local_keyframes_ > 0 && current_keyframe_ && current_OF_frame_ && odom_recovery_state != RECOVERY_FAILED) {
     rtabmap::RegistrationInfo reg_info;
@@ -503,7 +503,6 @@ void MapManager::process_new_sensor_data()
     {
       auto newPose = lastKFPose * t;
 
-      RCLCPP_DEBUG(get_logger(), "New pose from internal tracking: %s", newPose.prettyPrint().c_str());
       float inliersRatio = (float) reg_info.inliers / (float) current_keyframe_->keypoints().size();
       if ( inliersRatio > keyframe_generation_ratio_threshold_)
       {
@@ -524,12 +523,14 @@ void MapManager::process_new_sensor_data()
 
 
   if (compute_local_descriptors(sensor_data, inputImg)) {
+    //RCLCPP_DEBUG(get_logger(), "Updating base OF frame");
     optical_matcher->updateBaseFrame(inputImg, sensor_data->keypoints());
     current_OF_frame_ = sensor_data;
     if (odom_recovery_state == RECOVERY_FAILED) {
       RCLCPP_DEBUG(get_logger(), "Recovery has failed -- purposefully sending a new KF");
     } else if (current_keyframe_) {
       rtabmap::RegistrationInfo reg_info;
+      // RCLCPP_DEBUG(get_logger(), "Performing Feature matching");
       auto signatures = this->computeMatches(*current_keyframe_, *sensor_data);
       try {
         //RCLCPP_DEBUG(get_logger(), "Checking the matches computed transform");
@@ -569,7 +570,12 @@ void MapManager::process_new_sensor_data()
         if (odom_status != EXTERNAL) odom_status = LOCAL_TRACKING;
       }
     } else if (odom_status != EXTERNAL) {
-      odom_status = LOCAL_TRACKING;
+      if (nb_local_keyframes_ == 0) {
+        lastKFPose.setIdentity();
+        publish_odom_update(lastKFPose, cv::Mat::eye(6,6,CV_64FC1) * 0.01);
+      } else {
+        odom_status = LOCAL_TRACKING;
+      }
     }
     
     current_keyframe_ = sensor_data;
@@ -642,11 +648,11 @@ void MapManager::local_descriptors_request(
 }
 
 void MapManager::recover_odom_pose(cslam_common_interfaces::msg::InterRobotMatches::ConstSharedPtr matches) {
+  RCLCPP_DEBUG(get_logger(), "Attempting odom frame recovery");
   for(const auto match : matches->matches) {
     std::shared_ptr<rtabmap::SensorData> currentKF, matching_kf;
     {
-      const std::lock_guard<std::mutex> odom_state_lock(odom_state_mutex);
-      const std::lock_guard<std::mutex> map_lock(map_mutex);
+      const std::scoped_lock lock(odom_state_mutex, map_mutex);
       if (odom_status != LOCAL_TRACKING || current_keyframe_->id() != (int) match.robot1_keyframe_id) return;
       currentKF = current_keyframe_;
       matching_kf = local_descriptors_map_.at(match.robot0_keyframe_id);
