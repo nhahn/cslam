@@ -5,7 +5,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include "cslam_common_interfaces/msg/keyframe_rgb.hpp"
 #include "cslam_common_interfaces/msg/global_descriptor.hpp"
-#include <cv_bridge/cv_bridge.h>
+#include <cv_bridge/cv_bridge.hpp>
 #include <onnxruntime_cxx_api.h>
 #include <cuda_runtime.h>
 #include <opencv2/cudaarithm.hpp>
@@ -29,10 +29,10 @@ namespace cslam {
 		std::filesystem::path model (get_parameter("frontend.global_model").as_string());
 		if (model.extension() == ".onnx") {
 			RCLCPP_INFO(get_logger(), "Initialized ONNX global descriptor node");
-			GlobalMatcher = std::make_shared<cslam::GeoNetOnnxRunner>(model);
+			GlobalMatcher = std::make_shared<cslam_trt::GeoNetOnnxRunner>(model);
 		} else if (model.extension() == ".engine") {
 			RCLCPP_INFO(get_logger(), "Initialized TRT global descriptor node");
-			GlobalMatcher = std::make_shared<cslam::GeoNetTRT>(model);
+			GlobalMatcher = std::make_shared<cslam_trt::GeoNetTRT>(model);
 		} else {
 			throw std::runtime_error("Invalid global descriptor model type");
 		}
@@ -49,7 +49,7 @@ namespace cslam {
 	  };
 
 	  private:
-    	std::shared_ptr<cslam::GlobalDescriptorRunner> GlobalMatcher;
+    	std::shared_ptr<cslam_trt::GlobalDescriptorRunner> GlobalMatcher;
 		std::vector<float> embedding{};
 		rclcpp::Subscription<
 			cslam_common_interfaces::msg::KeyframeRGB>::SharedPtr
@@ -66,10 +66,11 @@ namespace cslam {
 			try{
         		GlobalMatcher->compute_embedding(keyframe->image, embedding);
 				auto globalDescriptorMsg = std::make_unique<cslam_common_interfaces::msg::GlobalDescriptor>();
-				for(int i = 0; i < embedding.size(); i++) {
+				for(size_t i = 0; i < embedding.size(); i++) {
 					globalDescriptorMsg->descriptor.push_back(embedding[i]);
 				}
 				globalDescriptorMsg->keyframe_id = keyframe_msg->id; 
+				globalDescriptorMsg->robot_id = keyframe_msg->image.header.frame_id == "global"? 0 : 1;
 				global_descriptor_publisher->publish(std::move(globalDescriptorMsg));
 			} catch (const std::exception &ex)
 			{

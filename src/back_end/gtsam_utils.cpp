@@ -53,7 +53,7 @@ gtsam_values_to_msg(const gtsam::Values &values) {
 std::vector<cslam_common_interfaces::msg::PoseGraphValue>
 gtsam_values_to_msg(const std::map<gtsam::Key,gtsam::Pose3> &values) {
   std::vector<cslam_common_interfaces::msg::PoseGraphValue> poses;
-  for (const auto key_value : values) {
+  for (const auto &key_value : values) {
     cslam_common_interfaces::msg::PoseGraphValue pose_msg;
     pose_msg.pose = gtsam_pose_to_msg(key_value.second);
     auto key = gtsam::LabeledSymbol(key_value.first);

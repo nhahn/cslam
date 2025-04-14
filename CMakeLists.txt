@@ -12,7 +12,7 @@ if(NOT CMAKE_CXX_STANDARD)
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic -g)
+  add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
 set(ONNXRuntime_ROOT_DIR "/opt/onnxruntime")
@@ -49,7 +49,7 @@ find_package(message_filters REQUIRED)
 find_package(class_loader REQUIRED)
 #find_package(rosgraph_msgs REQUIRED)
 find_package(image_geometry REQUIRED)
-#find_package(pluginlib REQUIRED)
+find_package(vpi REQUIRED)
 # find_package(rtabmap_ros REQUIRED)
 find_package(rtabmap_msgs REQUIRED)
 find_package(rtabmap_conversions REQUIRED)
@@ -131,29 +131,31 @@ target_link_libraries(pose_graph_manager_component gtsam)
 target_include_directories(pose_graph_manager_component PUBLIC
   ${GTSAM_INCLUDE_DIR}
 )
-rclcpp_components_register_node(pose_graph_manager_component PLUGIN "cslam::PoseGraphManagerComponent" EXECUTABLE pose_graph_manager)
+rclcpp_components_register_node(pose_graph_manager_component PLUGIN "cslam::PoseGraphManagerComponent" EXECUTABLE pose_graph_manager EXECUTOR MultiThreadedExecutor)
 set(node_plugins "${node_plugins}cslam::PoseGraphManagerComponent;$<TARGET_FILE:pose_graph_manager_component>\n")
 
 add_library(map_manager_component SHARED
   src/front_end/map_manager.cpp 
-  src/front_end/map_manager_component.cpp 
   src/front_end/stereo_handler.cpp 
   src/front_end/rgbd_handler.cpp 
-  #src/front_end/sensor_msg_utils.cpp
+  src/front_end/sensor_handler.cpp
   src/front_end/visualization_utils.cpp
+  src/front_end/optical_flow.cpp 
 )
 target_include_directories(map_manager_component PUBLIC
   ${RTABMap_INCLUDE_DIRS}
   $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_INCLUDEDIR}>
 )
+target_link_libraries(map_manager_component vpi)
 ament_target_dependencies(map_manager_component 
   ${Libraries} RTABMap cslam_common_interfaces lightglue_onnx)
-rclcpp_components_register_node(map_manager_component PLUGIN "cslam::MapManagerComponent" EXECUTABLE map_manager)
-set(node_plugins "${node_plugins}cslam::MapManagerComponent;$<TARGET_FILE:map_manager_component>\n")
+rclcpp_components_register_node(map_manager_component PLUGIN "cslam::MapManager" EXECUTABLE map_manager EXECUTOR MultiThreadedExecutor)
+set(node_plugins "${node_plugins}cslam::MapManager;$<TARGET_FILE:map_manager_component>\n")
 
-cuda_add_library(global_descriptor_component SHARED
+add_library(global_descriptor_component SHARED
   src/front_end/global_descriptor_component.cpp
 )
+
 target_link_libraries(global_descriptor_component ${ONNXRuntime_LIBRARIES})
 ament_target_dependencies(global_descriptor_component 
   ${Libraries}  
@@ -174,6 +176,7 @@ get_rmw_typesupport(typesupport_impls "${rmw_implementation}" LANGUAGE "cpp")
 install(DIRECTORY include/${PROJECT_NAME}/
    DESTINATION include/${PROJECT_NAME}
    FILES_MATCHING PATTERN "*.h"
+   PATTERN "*.hpp"
    PATTERN ".svn" EXCLUDE
 )
 
@@ -191,6 +194,20 @@ install(TARGETS map_manager_component pose_graph_manager_component global_descri
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
+
+option(PROFILE "Build the map manager profiler tool")
+if(PROFILE)
+  target_compile_definitions(map_manager_component PUBLIC PROFILE=1)
+  add_executable(map_profiler 
+    src/map_profiler.cpp
+  )
+  target_link_libraries(map_profiler vpi map_manager_component)
+  ament_target_dependencies(map_profiler ${Libraries} RTABMap cslam_common_interfaces lightglue_onnx)
+  install(TARGETS map_profiler
+          DESTINATION lib/${PROJECT_NAME})
+else()
+  target_compile_definitions(map_manager_component PUBLIC PROFILE=0)
+endif()
 
 file(GENERATE
 OUTPUT

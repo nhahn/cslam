@@ -16,13 +16,15 @@ from cslam_common_interfaces.msg import (
 from diagnostic_msgs.msg import KeyValue
 import time
 from sortedcontainers import SortedDict
-
+from collections import deque
 import rclpy
 from rclpy.node import Node
 from rclpy.clock import Clock
 
 from cslam.neighbors_manager import NeighborManager
 from cslam.utils.misc import dict_to_list_chunks
+from std_msgs.msg import UInt32
+from random import randint
 
 class GlobalDescriptorLoopClosureDetection(object):
     """ Global descriptor matching """
@@ -37,6 +39,7 @@ class GlobalDescriptorLoopClosureDetection(object):
         self.params = params
         self.node = node
         self.lcm = LoopClosureSparseMatching(params, node)
+        self.recovery_buffer = dict()
 
         # Place Recognition network setup
         if self.params['frontend.global_descriptor_technique'].lower(
@@ -91,6 +94,12 @@ class GlobalDescriptorLoopClosureDetection(object):
 
         self.local_match_publisher = self.node.create_publisher(
             LocalKeyframeMatch, 'cslam/local_keyframe_match', 100)
+        self.odom_recovery_publisher = self.node.create_publisher(
+            InterRobotMatches, 'cslam/odom_recovery', 1
+        )
+        self.add_recovered_pose = self.node.create_subscription(
+            LocalKeyframeMatch, 'cslam/add_recovered_pose', self.add_recovered_descriptor_to_map, 10
+        )
 
         self.receive_inter_robot_loop_closure_subscriber = self.node.create_subscription(
             InterRobotLoopClosure, '/cslam/inter_robot_loop_closure',
@@ -142,17 +151,34 @@ class GlobalDescriptorLoopClosureDetection(object):
 
         self.gpu_start_time = time.time() 
 
+    def add_recovered_descriptor_to_map(self, msg):
+        kf_id = msg.keyframe1_id
+        embedding = self.recovery_buffer[msg.keyframe0_id]
+        matches = self.lcm.add_local_global_descriptor(embedding, kf_id)
+        msg = GlobalDescriptor()
+        msg.keyframe_id = kf_id
+        msg.robot_id = self.params['robot_id']
+        msg.descriptor = embedding.tolist()
+        self.global_descriptors_buffer[kf_id] = msg
+
+        # Store matches
+        for match in matches:
+            self.inter_robot_matches_buffer[
+                self.nb_inter_robot_matches] = match
+            self.nb_inter_robot_matches += 1
+            
     def add_global_descriptor_to_map(self, embedding, kf_id):
         """ Add global descriptor to matching list
 
         Args:
             embedding (np.array): descriptor
             kf_id (int): keyframe ID
-        """
+        """        
+
+        self.detect_intra(embedding, kf_id)
         # Add for matching
         matches = self.lcm.add_local_global_descriptor(embedding, kf_id)
-        # Local matching
-        self.detect_intra(embedding, kf_id)
+
         #self.node.get_logger().info("Adding KF")
         # Store global descriptor
         msg = GlobalDescriptor()
@@ -298,8 +324,8 @@ class GlobalDescriptorLoopClosureDetection(object):
             if kf_match is not None:
                 msg = LocalKeyframeMatch()
                 self.node.get_logger().debug(f"KF similarity ({kf_id},{kf_match}): {similarities}")
-                msg.keyframe0_id = kf_id
-                msg.keyframe1_id = kf_match
+                msg.keyframe0_id = kf_match
+                msg.keyframe1_id = kf_id
                 self.local_match_publisher.publish(msg)
 
     def detect_inter(self):
@@ -331,7 +357,7 @@ class GlobalDescriptorLoopClosureDetection(object):
                     msg.keyframe_id = v[1]
                     msg.matches_robot_id = vertices_info[v][0]
                     msg.matches_keyframe_id = vertices_info[v][1]
-                    self.node.get_logger().info(f"Requesting local descriptors for {msg.matches_robot_id}:{msg.matches_keyframe_id}")    
+                    self.node.get_logger().debug(f"Requesting local descriptors for {msg.matches_robot_id}:{msg.matches_keyframe_id}")    
                     self.local_descriptors_request_publishers[v[0]].publish(
                         msg)
                 if self.params["evaluation.enable_logs"]:
@@ -382,8 +408,17 @@ class GlobalDescriptorLoopClosureDetection(object):
                 vertices[key1] = [[s.robot0_id], [s.robot0_keyframe_id]]
         return vertices
 
-    def receive_descriptor(self, msg):
-        self.add_global_descriptor_to_map(np.asarray(msg.descriptor), msg.keyframe_id)
+    def receive_descriptor(self, msg: GlobalDescriptor):
+        if msg.robot_id != 0:
+            self.recovery_buffer[msg.keyframe_id] = np.asarray(msg.descriptor)
+            # If we don't have a larger KF signature -- we've lost tracking and are trying to find it
+            kfs, similarities = self.lcm.find_recovery_candidates(msg.descriptor)
+            match_msg = InterRobotMatches()
+            for kf_match in kfs:
+                match_msg.matches.append(InterRobotMatch(robot0_keyframe_id=kf_match, robot1_keyframe_id=msg.keyframe_id))
+            self.odom_recovery_publisher.publish(match_msg)
+        else:
+            self.add_global_descriptor_to_map(np.asarray(msg.descriptor), msg.keyframe_id)
 
     def global_descriptor_callback(self, msg):
         """Callback for descriptors received from other robots.
@@ -412,7 +447,7 @@ class GlobalDescriptorLoopClosureDetection(object):
         if msg.robot_id != self.params['robot_id']:
             for match in msg.matches:
                 edge = EdgeInterRobot(match.robot0_id, match.robot0_keyframe_id, match.robot1_id, match.robot1_keyframe_id, match.weight)
-                self.node.get_logger().info(f"Received matching KF from: ({msg.robot_id})")    
+                self.node.get_logger().debug(f"Received matching KF from: ({msg.robot_id})")    
                 self.lcm.candidate_selector.add_match(edge)
 
     def inter_robot_loop_closure_msg_to_edge(self, msg):
@@ -452,7 +487,7 @@ class GlobalDescriptorLoopClosureDetection(object):
                              value=str(self.log_total_successful_matches)))
         else:
             # If geo verif fails, remove candidate
-            self.node.get_logger().info(
+            self.node.get_logger().debug(
                 'Failed inter-robot loop closure measurement: (' +
                 str(msg.robot0_id) + ',' + str(msg.robot0_keyframe_id) +
                 ') -> (' + str(msg.robot1_id) + ',' +

@@ -14,8 +14,10 @@ def launch_setup(context, *args, **kwargs):
     loop_detection_node = Node(package='cslam',
                                executable='loop_closure_detection_node.py',
                                name='cslam_loop_closure_detection',
+                               
                                parameters=[
-                                   ParameterFile(LaunchConfiguration('config').perform(context), allow_substs=True), {
+                                   ParameterFile(LaunchConfiguration('base_params').perform(context), allow_substs=True),
+                                   ParameterFile(LaunchConfiguration('robot_params').perform(context), allow_substs=True), {
                                        "robot_id": LaunchConfiguration('robot_id'),
                                        "max_nb_robots": LaunchConfiguration('max_nb_robots'),
                                         "tf_prefix": LaunchConfiguration('tf_prefix'),
@@ -33,7 +35,8 @@ def launch_setup(context, *args, **kwargs):
                                 plugin='cslam::PoseGraphManagerComponent',
                                 name=f"pose_graph_manager",
                                 parameters=[
-                                ParameterFile(LaunchConfiguration('config').perform(context), allow_substs=True), {
+                                ParameterFile(LaunchConfiguration('base_params').perform(context), allow_substs=True),
+                                ParameterFile(LaunchConfiguration('robot_params').perform(context), allow_substs=True), {
                                         "robot_id": LaunchConfiguration('robot_id'),
                                         "max_nb_robots": LaunchConfiguration('max_nb_robots'),
                                         "evaluation.enable_simulated_rendezvous": LaunchConfiguration('enable_simulated_rendezvous'),
@@ -43,13 +46,14 @@ def launch_setup(context, *args, **kwargs):
                                 ],
                                 extra_arguments=[{'use_intra_process_comms': True}]
                             )
-    map_manager_component = ComposableNode(
+    map_manager = ComposableNode(
                             package='cslam',
-                            plugin='cslam::MapManagerComponent',
+                            plugin='cslam::MapManager',
                             namespace=LaunchConfiguration('namespace'),
                             name=f"map_manager",
                             parameters=[
-                            ParameterFile(LaunchConfiguration('config').perform(context), allow_substs=True), {
+                            ParameterFile(LaunchConfiguration('base_params').perform(context), allow_substs=True),
+                            ParameterFile(LaunchConfiguration('robot_params').perform(context), allow_substs=True), {
                                     "robot_id": LaunchConfiguration('robot_id'),
                                     "max_nb_robots": LaunchConfiguration('max_nb_robots'),
                                     "tf_prefix": LaunchConfiguration('tf_prefix'),
@@ -64,7 +68,8 @@ def launch_setup(context, *args, **kwargs):
                                 plugin='cslam::GlobalDescriptorComponent',
                                 name=f"global_descriptor",
                                 parameters=[
-                                ParameterFile(LaunchConfiguration('config').perform(context), allow_substs=True), {
+                                ParameterFile(LaunchConfiguration('base_params').perform(context), allow_substs=True),
+                                ParameterFile(LaunchConfiguration('robot_params').perform(context), allow_substs=True), {
                                         "robot_id": LaunchConfiguration('robot_id'),
                                         "max_nb_robots": LaunchConfiguration('max_nb_robots'),
                                         "evaluation.enable_simulated_rendezvous": LaunchConfiguration('enable_simulated_rendezvous'),
@@ -79,15 +84,26 @@ def launch_setup(context, *args, **kwargs):
         loop_detection_node,
         ComposableNodeContainer(
                 namespace=LaunchConfiguration('namespace'),
-                name='cslam_container',
+                name='map_container',
                 package='rclcpp_components',
-                executable='component_container_isolated',
+                executable='component_container_mt',
                 arguments=['--ros-args','--log-level',LaunchConfiguration('log_level'),'--log-level','rcl:=INFO'],
-                composable_node_descriptions=[pose_graph_manager_component, global_descriptor_component, map_manager_component],
+                composable_node_descriptions=[global_descriptor_component, map_manager],
                 prefix=['stdbuf -o L'],
                 output='screen',
                 #  prefix="gdbgui --args",
-        )
+        ), 
+        ComposableNodeContainer(
+                namespace=LaunchConfiguration('namespace'),
+                name='pose_container',
+                package='rclcpp_components',
+                executable='component_container_mt',
+                arguments=['--ros-args','--log-level',LaunchConfiguration('log_level'),'--log-level','rcl:=INFO'],
+                composable_node_descriptions=[pose_graph_manager_component],
+                prefix=['stdbuf -o L'],
+                output='screen',
+                #  prefix="gdbgui --args",
+        ),
     ]
 
 
@@ -99,13 +115,20 @@ def generate_launch_description():
         DeclareLaunchArgument('robot_id', default_value='0', description=''),
         DeclareLaunchArgument('max_nb_robots', default_value='2', description=''),
         DeclareLaunchArgument('config_path', default_value='/config/', description=''),
-        DeclareLaunchArgument('config_file', default_value='cslam_hl2_stereo.yaml', description=''),
-        DeclareLaunchArgument('config',
+        DeclareLaunchArgument('base_config', default_value='cslam_shared.yaml', description=''),
+        DeclareLaunchArgument('robot_config', default_value='hl2_stereo.yaml', description=''),
+        DeclareLaunchArgument('base_params',
                               default_value=[
                                   LaunchConfiguration('config_path'),
-                                  LaunchConfiguration('config_file')
+                                  LaunchConfiguration('base_config')
                               ],
                               description=''),
+        DeclareLaunchArgument('robot_params',
+                        default_value=[
+                            LaunchConfiguration('config_path'),
+                            LaunchConfiguration('robot_config')
+                        ],
+                        description=''),
         DeclareLaunchArgument(
             'launch_prefix_cslam',
             default_value='',

@@ -18,6 +18,7 @@ class LoopClosureSparseMatching(object):
         # Extract params
         self.params = params
         self.node = node
+        self.current_kf = -1
         # Initialize matching structs
         if self.params["frontend.sensor_type"] == "lidar":
             self.local_nnsm = ScanContextMatching()
@@ -44,6 +45,7 @@ class LoopClosureSparseMatching(object):
         matches = []
         tensor = torch.from_numpy(embedding.astype(np.float32))
         self.local_nnsm.add_item(tensor, keyframe_id)
+        self.current_kf = keyframe_id
         for i in range(self.params['max_nb_robots']):
             if i != self.params['robot_id']:
                 kf, similarity = self.other_robots_nnsm[i].search_best(tensor)
@@ -69,7 +71,7 @@ class LoopClosureSparseMatching(object):
         kf, similarity = self.local_nnsm.search_best(tensor)
         if kf is not None:
             if similarity >= self.params['frontend.similarity_threshold']:
-                self.node.get_logger().info(f"Found potential matching KF: ({kf},{msg.keyframe_id}): {similarity}")    
+                self.node.get_logger().debug(f"Found potential matching KF: ({kf},{msg.keyframe_id}): {similarity}")    
                 match = EdgeInterRobot(self.params['robot_id'], kf, msg.robot_id,
                                    msg.keyframe_id, similarity)
                 self.candidate_selector.add_match(match)
@@ -77,8 +79,7 @@ class LoopClosureSparseMatching(object):
 
     def match_local_loop_closures(self, descriptor, kf_id):
         tensor = torch.from_numpy(np.asarray(descriptor).astype(np.float32))
-        kfs, similarities = self.local_nnsm.search(tensor,
-                                         k=self.params['frontend.nb_best_matches'])
+        kfs, similarities = self.local_nnsm.search(tensor,k=self.params['frontend.nb_best_matches'])
         
         if len(kfs) > 0 and kfs[0] == kf_id:
             kfs, similarities = kfs[1:], similarities[1:]
@@ -95,7 +96,11 @@ class LoopClosureSparseMatching(object):
 
             return kf, similarities
         return None, similarities
-
+    
+    def find_recovery_candidates(self, descriptor, num=10):
+        tensor = torch.from_numpy(np.asarray(descriptor).astype(np.float32))
+        kfs, similarities = self.local_nnsm.search(tensor,k=num)
+        return kfs, similarities
     def select_candidates(self,
                           number_of_candidates,
                           is_neighbor_in_range,

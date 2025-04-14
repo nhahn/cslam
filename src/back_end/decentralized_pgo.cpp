@@ -1,9 +1,10 @@
 #include "cslam/back_end/decentralized_pgo.h"
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
-#define MAP_FRAME_ID(id) "robot" + std::to_string(id) + "_map"
-#define CURRENT_FRAME_ID(id) "robot" + std::to_string(id) + "_current_pose"
-#define LATEST_OPTIMIZED_FRAME_ID(id) "robot" + std::to_string(id) + "_latest_optimized_pose"
+#define MAP_FRAME_ID(id) "r" + std::to_string(id) + "/map"
+#define CURRENT_FRAME_ID(id) "r" + std::to_string(id) + "/current_pose"
+#define LATEST_OPTIMIZED_FRAME_ID(id) "r" + std::to_string(id) + "/latest_optimized_pose"
+#define LATEST_LOCAL_MAP(id) "r" + std::to_string(id) + "/local_map"
 
 using namespace cslam;
 using namespace gtsam;
@@ -50,7 +51,7 @@ DecentralizedPGO::DecentralizedPGO(rclcpp::Node * node)
                        visualization_period_ms_);
   node_->get_parameter("frontend.sensor_base_frame_id", base_frame_id_);
 
-  int max_waiting_param;
+  int max_waiting_param = 60;
   node_->get_parameter("backend.max_waiting_time_sec", max_waiting_param);
   max_waiting_time_sec_ = rclcpp::Duration(max_waiting_param, 0);
   node_->get_parameter("backend.solver", backend_linear_solver_);
@@ -209,8 +210,12 @@ DecentralizedPGO::DecentralizedPGO(rclcpp::Node * node)
   rclcpp::PublisherOptions po;
   po.use_intra_process_comm = rclcpp::IntraProcessSetting::Disable;
   reference_frame_per_robot_publisher_ =
-      node_->create_publisher<geometry_msgs::msg::TransformStamped>(
+      node_->create_publisher<geometry_msgs::msg::PoseStamped>(
           "cslam/reference_frames", rclcpp::QoS(1).transient_local(), po);
+
+  odom_offset_publisher_ =
+      node_->create_publisher<geometry_msgs::msg::PoseStamped>(
+          "cslam/odom_offset", rclcpp::QoS(1).transient_local(), po);
 
   origin_robot_id_ = robot_id_;
 
@@ -251,12 +256,13 @@ void DecentralizedPGO::odometry_callback(
     const cslam_common_interfaces::msg::KeyframeOdom::UniquePtr msg)
 {
   gtsam::Pose3 current_estimate = odometry_msg_to_pose3(msg->odom);
-  const auto v = msg->odom.pose.covariance;
   gtsam::SharedNoiseModel noise = default_noise_model_;
   if (msg->odom.pose.covariance.front() != 0.0) {
     Vector6 diagonals;
-    for (int i = 0; i < 6; i++) {
-      diagonals[i] = msg->odom.pose.covariance[i * 7];
+    for (int i = 0; i < 3; i++) {
+      //GTSAM does rotation first, then translation
+      diagonals[i] = msg->odom.pose.covariance[(i + 3) * 7];
+      diagonals[i+3] = msg->odom.pose.covariance[i * 7];
     }
     noise = gtsam::noiseModel::Diagonal::Variances(diagonals);
   }
@@ -272,11 +278,11 @@ void DecentralizedPGO::odometry_callback(
     current_pose_estimates_->insert(symbol, current_estimate);
   }
 
-  if (latest_local_symbol_ != gtsam::LabeledSymbol())
+  if (latest_local_symbol_ != gtsam::LabeledSymbol() && !msg->tracking_reset)
   {
     gtsam::Pose3 odom_diff = latest_local_pose_.inverse() * current_estimate;
     gtsam::BetweenFactor<gtsam::Pose3> factor(latest_local_symbol_, symbol,
-                                              odom_diff, default_noise_model_);
+                                              odom_diff, noise);
     pose_graph_->push_back(factor);
   }
 
@@ -303,8 +309,10 @@ void DecentralizedPGO::intra_robot_loop_closure_callback(
   {
     gtsam::Pose3 measurement = pose_msg_to_gtsam(msg->pose.pose);
     Vector6 diagonals;
-    for (int i = 0; i < 6; i++) {
-      diagonals[i] = msg->pose.covariance[i * 7];
+    for (int i = 0; i < 3; i++) {
+      //GTSAM does rotation first, then
+      diagonals[i] = msg->pose.covariance[(i + 3) * 7];
+      diagonals[i+3] = msg->pose.covariance[i * 7];
     }
     auto noise = gtsam::noiseModel::Diagonal::Variances(diagonals);
     
@@ -338,8 +346,10 @@ void DecentralizedPGO::inter_robot_loop_closure_callback(
   {
     gtsam::Pose3 measurement = pose_msg_to_gtsam(msg->pose.pose);
     Vector6 diagonals;
-    for (int i = 0; i < 6; i++) {
-      diagonals[i] = msg->pose.covariance[i * 7];
+    for (int i = 0; i < 3; i++) {
+      //GTSAM does rotation first, then
+      diagonals[i] = msg->pose.covariance[(i + 3) * 7];
+      diagonals[i+3] = msg->pose.covariance[i * 7];
     }
     auto noise = gtsam::noiseModel::Diagonal::Variances(diagonals);
     unsigned char robot0_c = ROBOT_LABEL(msg->robot0_id);
@@ -781,15 +791,14 @@ void DecentralizedPGO::update_transform_to_origin(const gtsam::Pose3 &pose)
   rclcpp::Time now = node_->get_clock()->now();
   origin_to_first_pose_.header.stamp = now;
   origin_to_first_pose_.header.frame_id = MAP_FRAME_ID(origin_robot_id_);
-  origin_to_first_pose_.child_frame_id = MAP_FRAME_ID(robot_id_);
-  origin_to_first_pose_.transform = gtsam_pose_to_transform_msg(pose);
+  origin_to_first_pose_.pose = gtsam_pose_to_msg(pose);
   //tf2::doTransform(gtsam_pose_to_transform_msg(pose), origin_to_first_pose_.transform, base_transform_);
   // Update the reference frame
   // This is the key info for many tasks since it allows conversions from
   // one robot reference frame to another.
   if (reference_frame_per_robot_publisher_->get_subscription_count() > 0)
   {
-    auto msg = std::make_unique<geometry_msgs::msg::TransformStamped>(origin_to_first_pose_);
+    auto msg = std::make_unique<geometry_msgs::msg::PoseStamped>(origin_to_first_pose_);
     reference_frame_per_robot_publisher_->publish(std::move(msg));
     //Attach the original transform for offsetting the odom link
     //msg.transforms.emplace_back(gtsam_pose_to_transform_msg(origin_to_odom));
@@ -799,7 +808,12 @@ void DecentralizedPGO::update_transform_to_origin(const gtsam::Pose3 &pose)
   local_pose_at_latest_optimization_ = tentative_local_pose_at_latest_optimization_;
   latest_optimized_pose_ = current_pose_estimates_->at<gtsam::Pose3>(current_pose_estimates_->keys().back());
 
-  auto measurement = local_pose_at_latest_optimization_.inverse() * latest_optimized_pose_;
+  auto offset_msg = std::make_unique<geometry_msgs::msg::PoseStamped>();
+  offset_msg->header.stamp = now;
+  offset_msg->header.frame_id = MAP_FRAME_ID(origin_robot_id_);
+  offset_msg->pose = gtsam_pose_to_msg(latest_optimized_pose_ * local_pose_at_latest_optimization_.inverse());
+  odom_offset_publisher_->publish(std::move(offset_msg));
+  //auto measurement = local_pose_at_latest_optimization_.inverse() * latest_optimized_pose_;
   //RCLCPP_INFO(node_->get_logger(), "First - (%f, %f, %f) Pose offset - (%f, %f, %f)", origin_to_first_pose_.transform.translation.x, origin_to_first_pose_.transform.translation.y,
   //origin_to_first_pose_.transform.translation.z, measurement.x(), measurement.y(), measurement.z());
 }
@@ -813,14 +827,14 @@ void DecentralizedPGO::broadcast_tf_callback()
   // origin to local map
   std::vector<geometry_msgs::msg::TransformStamped> tfsToBroadcast;
   rclcpp::Time now = node_->get_clock()->now();
-  origin_to_first_pose_.header.stamp = now;
-  if (origin_to_first_pose_.header.frame_id !=
-      origin_to_first_pose_.child_frame_id)
-  {
-    //origin_to_first_pose_.transform = gtsam_pose_to_transform_msg(local_pose_at_latest_optimization_.inverse() * latest_optimized_pose_);
+  // origin_to_first_pose_.header.stamp = now;
+  // if (origin_to_first_pose_.header.frame_id !=
+  //     origin_to_first_pose_.child_frame_id)
+  // {
+  //   //origin_to_first_pose_.transform = gtsam_pose_to_transform_msg(local_pose_at_latest_optimization_.inverse() * latest_optimized_pose_);
 
-    tfsToBroadcast.push_back(origin_to_first_pose_);
-  } 
+  //   tfsToBroadcast.push_back(origin_to_first_pose_);
+  // } 
   
 
   geometry_msgs::msg::TransformStamped latest_optimized_pose_msg;
@@ -831,14 +845,19 @@ void DecentralizedPGO::broadcast_tf_callback()
         latest_optimized_pose_);
   tfsToBroadcast.push_back(latest_optimized_pose_msg);
 
+  geometry_msgs::msg::TransformStamped pose_offset;
+  pose_offset.header.stamp = now;
+  pose_offset.header.frame_id = LATEST_OPTIMIZED_FRAME_ID(robot_id_);
+  pose_offset.child_frame_id = LATEST_LOCAL_MAP(robot_id_);
+  pose_offset.transform = gtsam_pose_to_transform_msg(local_pose_at_latest_optimization_.inverse());
+  tfsToBroadcast.push_back(pose_offset);
+
   // latest optimized pose to latest local pose (odometry alone)
   geometry_msgs::msg::TransformStamped current_transform_msg;
   current_transform_msg.header.stamp = now;
-  current_transform_msg.header.frame_id = LATEST_OPTIMIZED_FRAME_ID(robot_id_);
+  current_transform_msg.header.frame_id = LATEST_LOCAL_MAP(robot_id_);
   current_transform_msg.child_frame_id = CURRENT_FRAME_ID(robot_id_);
-  gtsam::Pose3 current_pose_diff = local_pose_at_latest_optimization_.inverse() * latest_local_pose_;
-  current_transform_msg.transform = gtsam_pose_to_transform_msg(current_pose_diff);
-
+  current_transform_msg.transform = gtsam_pose_to_transform_msg(latest_local_pose_);
   tfsToBroadcast.push_back(current_transform_msg);
 
   tf_broadcaster_->sendTransform(tfsToBroadcast);
@@ -846,7 +865,7 @@ void DecentralizedPGO::broadcast_tf_callback()
   geometry_msgs::msg::PoseStamped pose_msg;
   pose_msg.header.stamp = now;
   pose_msg.header.frame_id = MAP_FRAME_ID(origin_robot_id_);
-  pose_msg.pose = gtsam_pose_to_msg(latest_optimized_pose_ * current_pose_diff);
+  pose_msg.pose = gtsam_pose_to_msg(latest_optimized_pose_ * local_pose_at_latest_optimization_.inverse() * latest_local_pose_);
   optimized_pose_estimate_publisher_->publish(pose_msg);
 }
 

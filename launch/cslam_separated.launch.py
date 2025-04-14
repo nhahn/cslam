@@ -10,11 +10,13 @@ from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterFile
 
 def launch_setup(context, *args, **kwargs):
+    profile = LaunchConfiguration('profile').perform(context).lower() == 'true'
     loop_detection_node = Node(package='cslam',
                                executable='loop_closure_detection_node.py',
                                name='cslam_loop_closure_detection',
                                parameters=[
-                                   ParameterFile(LaunchConfiguration('config').perform(context), allow_substs=True), {
+                                   ParameterFile(LaunchConfiguration('base_params').perform(context), allow_substs=True),
+                                   ParameterFile(LaunchConfiguration('robot_params').perform(context), allow_substs=True), {
                                        "robot_id": LaunchConfiguration('robot_id'),
                                        "max_nb_robots": LaunchConfiguration('max_nb_robots'),
                                        "tf_prefix": LaunchConfiguration('tf_prefix'),
@@ -26,10 +28,11 @@ def launch_setup(context, *args, **kwargs):
                                namespace=LaunchConfiguration('namespace'))
 
     map_manager_node = Node(package='cslam',
-                            executable='map_manager',
+                            executable='map_profiler' if profile else 'map_manager',
                             name='cslam_map_manager',
                             parameters=[
-                                ParameterFile(LaunchConfiguration('config').perform(context), allow_substs=True), {
+                                ParameterFile(LaunchConfiguration('base_params').perform(context), allow_substs=True),
+                                ParameterFile(LaunchConfiguration('robot_params').perform(context), allow_substs=True),  {
                                     "robot_id": LaunchConfiguration('robot_id'),
                                     "max_nb_robots": LaunchConfiguration('max_nb_robots'),
                                     "tf_prefix": LaunchConfiguration('tf_prefix'),
@@ -43,7 +46,8 @@ def launch_setup(context, *args, **kwargs):
                                    executable='pose_graph_manager',
                                    name='cslam_pose_graph_manager',
                                    parameters=[
-                                       ParameterFile(LaunchConfiguration('config').perform(context), allow_substs=True), {
+                                       ParameterFile(LaunchConfiguration('base_params').perform(context), allow_substs=True),
+                                        ParameterFile(LaunchConfiguration('robot_params').perform(context), allow_substs=True),  {
                                            "robot_id": LaunchConfiguration('robot_id'),
                                            "max_nb_robots": LaunchConfiguration('max_nb_robots'),
                                            "evaluation.enable_simulated_rendezvous": LaunchConfiguration('enable_simulated_rendezvous'),
@@ -61,7 +65,8 @@ def launch_setup(context, *args, **kwargs):
                                 executable='global_descriptor',
                                 namespace=LaunchConfiguration('namespace'),
                                 parameters=[
-                                ParameterFile(LaunchConfiguration('config').perform(context), allow_substs=True), {
+                                ParameterFile(LaunchConfiguration('base_params').perform(context), allow_substs=True),
+                                ParameterFile(LaunchConfiguration('robot_params').perform(context), allow_substs=True),  {
                                         "robot_id": LaunchConfiguration('robot_id'),
                                         "max_nb_robots": LaunchConfiguration('max_nb_robots'),
                                         "evaluation.enable_simulated_rendezvous": LaunchConfiguration('enable_simulated_rendezvous'),
@@ -88,14 +93,22 @@ def generate_launch_description():
         DeclareLaunchArgument('robot_id', default_value='0', description=''),
         DeclareLaunchArgument('tf_prefix', default_value=PythonExpression(['("', LaunchConfiguration('namespace'), '".strip("/") + "/").lstrip("/")'])),
         DeclareLaunchArgument('max_nb_robots', default_value='2', description=''),
+        DeclareLaunchArgument('profile', default_value='false', description=''),
         DeclareLaunchArgument('config_path', default_value='/config/', description=''),
-        DeclareLaunchArgument('config_file', default_value='cslam_hl2_stereo.yaml', description=''),
-        DeclareLaunchArgument('config',
+        DeclareLaunchArgument('base_config', default_value='cslam_shared.yaml', description=''),
+        DeclareLaunchArgument('robot_config', default_value='hl2_stereo.yaml', description=''),
+        DeclareLaunchArgument('base_params',
                               default_value=[
                                   LaunchConfiguration('config_path'),
-                                  LaunchConfiguration('config_file')
+                                  LaunchConfiguration('base_config')
                               ],
                               description=''),
+        DeclareLaunchArgument('robot_params',
+                        default_value=[
+                            LaunchConfiguration('config_path'),
+                            LaunchConfiguration('robot_config')
+                        ],
+                        description=''),
         DeclareLaunchArgument(
             'launch_prefix_cslam',
             default_value='',

@@ -1,12 +1,20 @@
-#ifndef _STEREOHANDLER_H_
-#define _STEREOHANDLER_H_
+#pragma once
 
-#include "cslam/front_end/rgbd_handler.h"
+#include "cslam/front_end/sensor_handler.h"
 
 namespace cslam
 {
+    typedef message_filters::sync_policies::ApproximateTime<
+            sensor_msgs::msg::Image, sensor_msgs::msg::Image,
+            sensor_msgs::msg::CameraInfo, sensor_msgs::msg::CameraInfo>
+            ApproximateStereoSync;
 
-    class StereoHandler : public RGBDHandler
+    typedef message_filters::sync_policies::ExactTime<
+            sensor_msgs::msg::Image, sensor_msgs::msg::Image,
+            sensor_msgs::msg::CameraInfo, sensor_msgs::msg::CameraInfo>
+            ExactStereoSync;
+    template <typename SyncPolicy>
+    class StereoHandler : public SensorHandler
     {
     public:
         /**
@@ -14,7 +22,7 @@ namespace cslam
          *
          * @param node ROS 2 node handle
          */
-        StereoHandler(rclcpp::Node * node);
+        explicit StereoHandler(rclcpp::Node * node);
         ~StereoHandler(){};
 
         /**
@@ -32,26 +40,15 @@ namespace cslam
             const sensor_msgs::msg::CameraInfo::ConstSharedPtr camera_info_left,
             const sensor_msgs::msg::CameraInfo::ConstSharedPtr camera_info_right);
 
-        /**
-         * @brief Send keypoints for visualizations
-         * 
-         * @param keypoints_data keyframe keypoints data
-         */
-        virtual void send_visualization(const std::pair<std::shared_ptr<rtabmap::SensorData>, std::shared_ptr<const nav_msgs::msg::Odometry>> &keypoints_data);
 
     private:
-        std::shared_ptr<rtabmap::StereoCameraModel> stereoCameraModel {nullptr};
 
         image_transport::SubscriberFilter sub_image_rect_left_;
         image_transport::SubscriberFilter sub_image_rect_right_;
         image_transport::SubscriberFilter sub_image_global_;
         message_filters::Subscriber<sensor_msgs::msg::CameraInfo> sub_camera_info_left_;
         message_filters::Subscriber<sensor_msgs::msg::CameraInfo> sub_camera_info_right_;
-        typedef message_filters::sync_policies::ApproximateTime<
-            sensor_msgs::msg::Image, sensor_msgs::msg::Image,
-            sensor_msgs::msg::CameraInfo, sensor_msgs::msg::CameraInfo>
-            StereoPolicy;
-        std::unique_ptr<message_filters::Synchronizer<StereoPolicy>> stereo_synchronizer;
+
+        std::unique_ptr<message_filters::Synchronizer<SyncPolicy>> stereo_synchronizer;
     };
 } // namespace cslam
-#endif
